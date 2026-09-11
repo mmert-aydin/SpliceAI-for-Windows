@@ -316,11 +316,31 @@ def _read_vcf_text(path):
         raise RuntimeError(f"could not open/read file: {exc}") from exc
 
 
+# File names treated as VCFs (by "Load file..." and drag and drop) and as
+# reference FASTAs when dropped onto the window.
+VCF_SUFFIXES = (".vcf", ".vcf.gz", ".vcf.bgz", ".bgz")
+FASTA_SUFFIXES = (".fa", ".fasta", ".fna")
+
+
+def dropped_local_files(mime_data):
+    """Local paths in a drag (e.g. files from Explorer), in order; [] for a
+    text drag."""
+    if not mime_data.hasUrls():
+        return []
+    # normpath: Qt gives C:/Users/..., shown in the fields as C:\Users\...
+    return [os.path.normpath(url.toLocalFile()) for url in mime_data.urls() if url.isLocalFile()]
+
+
+def dropped_vcf_path(mime_data):
+    """The first dropped file with a VCF name, or None."""
+    return next((p for p in dropped_local_files(mime_data) if p.lower().endswith(VCF_SUFFIXES)), None)
+
+
 class VcfDropTextEdit(QPlainTextEdit):
-    """QPlainTextEdit that also accepts a single .vcf/.vcf.gz file dropped onto
-    it -- normal text drag-drop (e.g. dragging a text selection) still falls
-    through to the base class untouched; only file-URL drops with a
-    recognized VCF extension are intercepted."""
+    """QPlainTextEdit that also accepts a VCF file dropped onto it -- normal
+    text drag-drop (e.g. dragging a text selection) still falls through to the
+    base class untouched. Other files are left to the main window (see
+    MainWindow.dropEvent) instead of being pasted in as a file:/// URL."""
 
     fileDropped = Signal(str)
 
@@ -330,38 +350,67 @@ class VcfDropTextEdit(QPlainTextEdit):
         self._base_style = ""
         self._drag_style = "QPlainTextEdit { border: 2px dashed #1a5fb4; }"
 
-    @staticmethod
-    def _dropped_vcf_path(mime_data):
-        if not mime_data.hasUrls():
-            return None
-        path = mime_data.urls()[0].toLocalFile()
-        if path.lower().endswith((".vcf", ".vcf.gz")):
-            return path
-        return None
+    def set_drop_highlight(self, on):
+        self.setStyleSheet(self._drag_style if on else self._base_style)
 
     def dragEnterEvent(self, event):
-        if self._dropped_vcf_path(event.mimeData()):
+        if dropped_vcf_path(event.mimeData()):
             event.acceptProposedAction()
-            self.setStyleSheet(self._drag_style)
+            self.set_drop_highlight(True)
+        elif event.mimeData().hasUrls():
+            event.ignore()
         else:
             super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event):
-        if self._dropped_vcf_path(event.mimeData()):
+        if dropped_vcf_path(event.mimeData()):
             event.acceptProposedAction()
+        elif event.mimeData().hasUrls():
+            event.ignore()
         else:
             super().dragMoveEvent(event)
 
     def dragLeaveEvent(self, event):
-        self.setStyleSheet(self._base_style)
+        self.set_drop_highlight(False)
         super().dragLeaveEvent(event)
 
     def dropEvent(self, event):
-        self.setStyleSheet(self._base_style)
-        path = self._dropped_vcf_path(event.mimeData())
+        self.set_drop_highlight(False)
+        path = dropped_vcf_path(event.mimeData())
         if path:
             event.acceptProposedAction()
             self.fileDropped.emit(path)
+        elif event.mimeData().hasUrls():
+            event.ignore()
+        else:
+            super().dropEvent(event)
+
+
+class PathLineEdit(QLineEdit):
+    """QLineEdit for a file or folder path that also takes one dragged in from
+    Explorer: it emits pathDropped(local_path) -- MainWindow decides what the
+    file is for -- instead of inserting its file:/// URL as text, which is
+    what a plain QLineEdit does. Typing and pasting work as usual."""
+
+    pathDropped = Signal(str)
+
+    def dragEnterEvent(self, event):
+        if dropped_local_files(event.mimeData()):
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if dropped_local_files(event.mimeData()):
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        files = dropped_local_files(event.mimeData())
+        if files:
+            event.acceptProposedAction()
+            self.pathDropped.emit(files[0])
         else:
             super().dropEvent(event)
 
@@ -402,6 +451,9 @@ class MainWindow(QMainWindow):
         self._last_run_duration = None
 
         self._build_ui()
+        # Files can be dragged onto the whole window, not just the input box
+        # (see dropEvent).
+        self.setAcceptDrops(True)
         self._load_settings()
         self._update_precomputed_enabled()
         self._update_run_enabled()
@@ -552,7 +604,7 @@ class MainWindow(QMainWindow):
 
         self.vcf_text = VcfDropTextEdit()
         self.vcf_text.setPlaceholderText(
-            'Paste VCF content here, use "Load file..." below, or drag-and-drop a .vcf/.vcf.gz file here.'
+            'Paste VCF content here, use "Load file..." below, or drag a .vcf / .vcf.gz file anywhere onto this window.'
         )
         self.vcf_text.textChanged.connect(self._update_run_enabled)
         self.vcf_text.textChanged.connect(self._on_vcf_text_changed)
@@ -561,6 +613,7 @@ class MainWindow(QMainWindow):
 
         row = QHBoxLayout()
         load_btn = QPushButton("Load file...")
+        load_btn.setToolTip("Open a VCF file -- or drag one from Explorer anywhere onto this window.")
         load_btn.clicked.connect(self._on_load_file)
         row.addWidget(load_btn)
         self.load_status_label = QLabel("")
@@ -650,7 +703,9 @@ class MainWindow(QMainWindow):
 
         precomp_dir_row = QHBoxLayout()
         precomp_dir_row.addWidget(QLabel("Precomputed data folder:"))
-        self.precomputed_dir_edit = QLineEdit()
+        self.precomputed_dir_edit = PathLineEdit()
+        self.precomputed_dir_edit.pathDropped.connect(
+            lambda p: self._handle_dropped_file(p, folder_edit=self.precomputed_dir_edit))
         self.precomputed_dir_edit.textChanged.connect(self._update_run_enabled)
         precomp_dir_row.addWidget(self.precomputed_dir_edit, stretch=1)
         self.precomputed_dir_browse = QPushButton("Browse...")
@@ -671,8 +726,10 @@ class MainWindow(QMainWindow):
             label = QLabel()
             label.setMinimumWidth(label_width)
             fasta_row.addWidget(label)
-            edit = QLineEdit()
+            edit = PathLineEdit()
             edit.setPlaceholderText(f"{build}.fa -- keep its .fa.fai next to it")
+            edit.setToolTip(f"The {build} reference FASTA -- Browse..., or drag the .fa file here.")
+            edit.pathDropped.connect(lambda p, b=build: self._handle_dropped_file(p, fasta_build=b))
             edit.textChanged.connect(self._update_run_enabled)
             fasta_row.addWidget(edit, stretch=1)
             browse = QPushButton("Browse...")
@@ -717,7 +774,8 @@ class MainWindow(QMainWindow):
 
         snpeff_row = QHBoxLayout()
         snpeff_row.addWidget(QLabel("SnpEff install folder:"))
-        self.snpeff_dir_edit = QLineEdit()
+        self.snpeff_dir_edit = PathLineEdit()
+        self.snpeff_dir_edit.pathDropped.connect(lambda p: self._handle_dropped_file(p, folder_edit=self.snpeff_dir_edit))
         self.snpeff_dir_edit.setPlaceholderText(DEFAULT_SNPEFF_DIR)
         self.snpeff_dir_edit.textChanged.connect(self._update_run_enabled)
         snpeff_row.addWidget(self.snpeff_dir_edit, stretch=1)
@@ -735,7 +793,8 @@ class MainWindow(QMainWindow):
         mane_row.addWidget(QLabel("MANE Select folder (optional -- improves transcript choice):"))
         # Where the MANE summary file is -- empty means the program's own
         # "mane" folder (DEFAULT_MANE_DIR). Passed to the run (worker.py).
-        self.mane_dir_edit = QLineEdit()
+        self.mane_dir_edit = PathLineEdit()
+        self.mane_dir_edit.pathDropped.connect(lambda p: self._handle_dropped_file(p, folder_edit=self.mane_dir_edit))
         self.mane_dir_edit.setPlaceholderText(DEFAULT_MANE_DIR)
         self.mane_dir_edit.textChanged.connect(self._update_mane_status_label)
         mane_row.addWidget(self.mane_dir_edit, stretch=1)
@@ -1053,13 +1112,67 @@ class MainWindow(QMainWindow):
     # (Original comments weren't recoverable from the compiled program; blank and
     # comment lines like these keep line numbers where they were.)
     def _on_load_file(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Load VCF file", "", "VCF files (*.vcf *.vcf.gz);;All files (*)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load VCF file", "", "VCF files (*.vcf *.vcf.gz *.vcf.bgz *.bgz);;All files (*)"
+        )
         if not path:
             return
         self._load_vcf_from_path(path)
 
     def _on_file_dropped(self, path):
         self._load_vcf_from_path(path)
+
+    # Drag and drop anywhere on the window (the input box and the path fields
+    # handle drops onto themselves, and pass other files on to here).
+    def dragEnterEvent(self, event):
+        files = dropped_local_files(event.mimeData())
+        if files:
+            event.acceptProposedAction()
+            self.vcf_text.set_drop_highlight(bool(dropped_vcf_path(event.mimeData())))
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if dropped_local_files(event.mimeData()):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragLeaveEvent(self, event):
+        self.vcf_text.set_drop_highlight(False)
+
+    def dropEvent(self, event):
+        self.vcf_text.set_drop_highlight(False)
+        files = dropped_local_files(event.mimeData())
+        if not files:
+            event.ignore()
+            return
+        event.acceptProposedAction()
+        self._handle_dropped_file(dropped_vcf_path(event.mimeData()) or files[0])
+
+    def _handle_dropped_file(self, path, fasta_build=None, folder_edit=None):
+        """What a dragged-in file is for, by its name: a VCF loads (like "Load
+        file..."), a FASTA goes into a reference row (fasta_build's when dropped
+        onto that row, else the build its name says, else the selected one), a
+        MANE summary sets the MANE folder, and anything dropped onto a folder
+        field sets that field."""
+        name = path.lower()
+        if name.endswith(VCF_SUFFIXES):
+            self._load_vcf_from_path(path)
+        elif name.endswith(FASTA_SUFFIXES):
+            build = fasta_build or config.guess_build_from_name(path) or self.build_combo.currentText()
+            self._set_fasta(build, path)
+        elif is_summary_filename(path):
+            self.mane_dir_edit.setText(os.path.dirname(path))
+        elif folder_edit is not None:
+            folder_edit.setText(path if os.path.isdir(path) else os.path.dirname(path))
+        else:
+            QMessageBox.information(
+                self, "Can't use this file",
+                f"{os.path.basename(path)} can't be loaded here.\n\n"
+                "Drag in a VCF (.vcf, .vcf.gz) to score it, a reference FASTA (.fa, .fasta, .fna) "
+                "for its build's row, or a MANE summary file (MANE.GRCh38.vX.X.summary.txt.gz).",
+            )
 
     def _load_vcf_from_path(self, path):
         """Shared by "Load file..." and drag-and-drop onto the input area --
@@ -1223,8 +1336,12 @@ class MainWindow(QMainWindow):
             self, f"Select the {build} reference FASTA", os.path.dirname(self.fasta_edits[build].text()),
             "FASTA files (*.fa *.fasta *.fna);;All files (*)",
         )
-        if not path:
-            return
+        if path:
+            self._set_fasta(build, path)
+
+    def _set_fasta(self, build, path):
+        """Puts a FASTA into a build's row -- from Browse... or a drop -- asking
+        first when its file name names the other build."""
         named = config.guess_build_from_name(path)
         if named and named != build:
             reply = QMessageBox.question(

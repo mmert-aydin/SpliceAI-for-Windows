@@ -11,6 +11,7 @@ import time
 import helpers
 from helpers import check
 
+helpers.watchdog(120)
 home = helpers.isolate_home()
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 helpers.setup(need_spliceai=False)

@@ -12,6 +12,7 @@ powershell -ExecutionPolicy Bypass -File tests\run-tests.ps1     # all of them
 |---|---|---|
 | `test_pipeline.py` | normalization (incl. complex indels), blank lines, chromosome names (MT/chrM, unknown, RefSeq-named FASTA), wrong-build stop, SpliceAI skip reasons, SnpEff per gene, ANKRD26 chr10:27326999 T>C = 0.29 | ~2 min |
 | `test_build_selection.py` | automatic hg19/hg38 selection from the VCF header, per-build FASTA rows, settings migration | ~15 s |
+| `test_drag_drop.py` | dragging files in from Explorer: a VCF anywhere on the window loads, a FASTA goes to its build's row, a MANE file / folder to its field, anything else is explained | ~10 s |
 | `test_gui_features.py` | Pause / Resume / End (also during SnpEff), closing during a run, CPU display, MANE folder, SpliceAI check, scrolling | ~2 min |
 
 **Needs**

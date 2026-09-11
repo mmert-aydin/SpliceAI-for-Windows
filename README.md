@@ -259,6 +259,19 @@ Files: `spliceai_pipeline/normalize.py`, `vcfio.py`, `score.py`, `snpeff.py`,
 - **The whole window scrolls**, so small screens work; the window also starts no
   bigger than the screen, and the results table keeps a usable minimum height.
 
+**Drag and drop anywhere on the window (2026-09-11).** Before, only the VCF box
+took dropped files; elsewhere nothing happened, and a file dropped onto a path
+field was pasted in as a `file:///` address. Now a file dragged from Explorer
+anywhere onto the window is used by its name: a VCF (`.vcf`, `.vcf.gz`,
+`.vcf.bgz`, `.bgz`) loads like "Load file..."; a FASTA (`.fa`, `.fasta`, `.fna`)
+goes into its build's reference row (the row it's dropped on, else the build its
+name says, else the selected one -- with the same "different build?" question as
+Browse...); a MANE summary file sets the MANE folder; a folder dropped onto a
+folder field sets it; anything else gets a short explanation. The VCF box shows its
+dashed frame while a VCF is dragged over the window. Files:
+`spliceai_gui/main_window.py` (`PathLineEdit`, `MainWindow.dropEvent`); checks in
+`tests/test_drag_drop.py`.
+
 **Files saved "with BOM" are read normally (2026-09-11).** Some Windows editors
 (and Windows PowerShell) write UTF-8 with an invisible byte-order mark. Before,
 such a `config.json` or gene-list file was silently ignored (all settings back to

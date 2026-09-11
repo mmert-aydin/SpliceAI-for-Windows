@@ -10,6 +10,7 @@ import sys
 import helpers
 from helpers import check, skip
 
+helpers.watchdog(900)
 helpers.setup()
 
 from pyfaidx import Fasta  # noqa: E402

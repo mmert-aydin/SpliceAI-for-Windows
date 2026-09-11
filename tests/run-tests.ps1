@@ -14,7 +14,7 @@ if (-not (Test-Path $py)) { throw "No build venv (.venv) -- run installer\build.
 # on TensorFlow's harmless stderr messages when the output is redirected.)
 $ErrorActionPreference = "Continue"
 $failed = @()
-foreach ($test in "test_pipeline.py", "test_build_selection.py", "test_gui_features.py") {
+foreach ($test in "test_pipeline.py", "test_build_selection.py", "test_drag_drop.py", "test_gui_features.py") {
     Write-Host "==> $test" -ForegroundColor Cyan
     & $py -W ignore (Join-Path $PSScriptRoot $test)
     if ($LASTEXITCODE -ne 0) { $failed += $test }

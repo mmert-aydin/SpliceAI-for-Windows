@@ -50,6 +50,21 @@ def finish():
     sys.exit(1 if _failures else 0)
 
 
+def watchdog(seconds):
+    """Ends this script with a FAIL if it's still running after `seconds` --
+    e.g. an unexpected modal dialog in the invisible (offscreen) window would
+    otherwise wait for a click forever."""
+    import threading
+
+    def fire():
+        print(f"FAIL watchdog: still running after {seconds} s -- something is waiting (a dialog?)", flush=True)
+        os._exit(3)
+
+    timer = threading.Timer(seconds, fire)
+    timer.daemon = True
+    timer.start()
+
+
 def isolate_home():
     """Gives this process a throw-away home folder, so the GUI's settings
     (~/.spliceai_gui) are never the user's real ones. Call it before

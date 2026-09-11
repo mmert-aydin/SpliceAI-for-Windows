@@ -16,6 +16,7 @@ import time
 import helpers
 from helpers import check, skip
 
+helpers.watchdog(900)
 home = helpers.isolate_home()
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 helpers.setup()
@@ -130,9 +131,11 @@ check("live scoring starts", wait_for(lambda: scored(w) >= 10, 180), w.progress_
 w._on_pause_clicked()
 check("Pause turns into Resume", w.pause_button.text() == "Resume")
 settle(4)  # let the variant in progress finish
-w._cpu_meter.sample()
+# A meter of our own: the window's is also read by its 1-second display timer,
+# and a reading taken right after that one would come back empty.
+paused_meter = CpuMeter()
 settle(6)
-cpu_while_paused, _ = w._cpu_meter.sample()
+cpu_while_paused, _ = paused_meter.sample()
 check("while paused, the program uses (almost) no CPU -- nothing is scored",
       cpu_while_paused is not None and cpu_while_paused < 5, f"{cpu_while_paused}%")
 check("the CPU display is shown during a run", w.cpu_label.isVisible() and w.cpu_label.text().startswith("CPU:"))
