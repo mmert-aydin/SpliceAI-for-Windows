@@ -10,6 +10,10 @@
                        and finish anyway; everything else must work offline
     offline-usb-wheel  network off, the SpliceAI wheel next to Setup.exe on the
                        "USB drive": Setup must use it
+    clickthrough       network on: clicks through the real Setup wizard and the
+                       program like a person (SpliceAI check, a real Run, normal
+                       uninstall), with a screenshot of every step (clickthrough.ps1;
+                       -MemoryMB 6144 is enough)
     manual             network on, nothing automated -- click through it yourself
 
   Mapped into the sandbox (read-only unless noted):
@@ -26,7 +30,7 @@
     -ExtraVcf $HOME\Desktop\my-variants.vcf -ExtraExpected <known-good my-variants.tsv>
 #>
 param(
-    [ValidateSet("online", "offline", "offline-usb-wheel", "manual")]
+    [ValidateSet("online", "offline", "offline-usb-wheel", "clickthrough", "manual")]
     [string]$Scenario = "online",
     [string]$Setup,
     [string]$ReferenceDir = "$env:USERPROFILE\SpliceAI_reference_data",
@@ -35,7 +39,11 @@ param(
     [string]$ExtraVcf,
     [string]$ExtraExpected,
     [string]$Wheel,
-    [int]$TimeoutMinutes = 60
+    [int]$TimeoutMinutes = 60,
+    # Memory for the sandbox. Scoring a large VCF needs the default; the
+    # click-through (one variant) is fine with 6144, which leaves more for
+    # the PC itself.
+    [int]$MemoryMB = 8192
 )
 
 $ErrorActionPreference = "Stop"
@@ -61,7 +69,7 @@ $harness = New-Item -ItemType Directory -Force (Join-Path $work "harness")
 New-Item -ItemType Directory -Force $results | Out-Null
 # A copy, not this folder itself: results\ lives inside it, and mapping a
 # folder and one of its subfolders separately can make the sandbox refuse to start.
-Copy-Item (Join-Path $PSScriptRoot "sandbox-test.ps1") $harness
+Copy-Item (Join-Path $PSScriptRoot "sandbox-test.ps1"), (Join-Path $PSScriptRoot "clickthrough.ps1") $harness
 
 # Hard links: no 600 MB copy (same volume).
 New-Item -ItemType HardLink -Path (Join-Path $usb (Split-Path $Setup -Leaf)) -Target $Setup | Out-Null
@@ -77,13 +85,16 @@ function Map($hostDir, $sandboxDir, $readOnly) {
     "    <MappedFolder><HostFolder>$hostDir</HostFolder><SandboxFolder>$sandboxDir</SandboxFolder><ReadOnly>$($readOnly.ToString().ToLower())</ReadOnly></MappedFolder>"
 }
 $networking = if ($Scenario -like "offline*") { "Disable" } else { "Default" }
-$logon = if ($Scenario -eq "manual") { "" } else {
-    "  <LogonCommand><Command>powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Minimized -File C:\Harness\sandbox-test.ps1 -Scenario $Scenario</Command></LogonCommand>"
+$logon = switch ($Scenario) {
+    "manual" { "" }
+    # Clicks through the real wizard and window like a person, with screenshots.
+    "clickthrough" { "  <LogonCommand><Command>powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Minimized -File C:\Harness\clickthrough.ps1</Command></LogonCommand>" }
+    default { "  <LogonCommand><Command>powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Minimized -File C:\Harness\sandbox-test.ps1 -Scenario $Scenario</Command></LogonCommand>" }
 }
 $wsb = @"
 <Configuration>
   <Networking>$networking</Networking>
-  <MemoryInMB>8192</MemoryInMB>
+  <MemoryInMB>$MemoryMB</MemoryInMB>
   <MappedFolders>
 $(Map $usb "C:\USB" $true)
 $(Map $ReferenceDir "C:\Ref" $true)

@@ -1,0 +1,5 @@
+##fileformat=VCFv4.2
+##reference=hg19
+##contig=<ID=chr10,length=135534747>
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+chr10	27326999	.	T	C	.	.	.
