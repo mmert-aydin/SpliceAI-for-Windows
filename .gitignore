@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+.venv/
+build/
+dist/
+
+# Downloaded at runtime next to the app, not project code
+snpeff/
+mane/
+java/
+*.fa
+*.fa.fai
+*.fa.gz
+
+# Installer build: third-party payload (large, re-fetchable -- see
+# installer/fetch-thirdparty.ps1), intermediate files and the built Setup.exe
+installer/thirdparty/
+installer/build/
+installer/output/
+installer/test/results/

@@ -1,0 +1,35 @@
+SpliceAI Variant Scoring - please read before installing
+
+WHAT THIS SETUP INSTALLS
+
+This Setup contains SpliceAI Variant Scoring and the tools it uses:
+  - SnpEff with its GRCh37 and GRCh38 RefSeq databases (MIT License)
+  - Eclipse Temurin 21 Java runtime, used only to run SnpEff
+    (GPLv2 with Classpath Exception)
+  - NCBI MANE Select summary data (public domain, NCBI)
+  - Microsoft Visual C++ runtime files, used only by this program
+
+SPLICEAI ITSELF IS NOT INCLUDED
+
+SpliceAI is made by Illumina, Inc. During installation, Setup downloads the
+official SpliceAI 1.3.1 package directly from the Python Package Index
+(pypi.org), where it is published, and checks that the file is exactly the
+published one. This needs an internet connection once, during Setup only.
+
+SpliceAI is licensed by Illumina, Inc.:
+  - source code: PolyForm Strict License 1.0.0
+  - trained models: Creative Commons BY-NC 4.0
+Both allow academic and non-commercial use only. By continuing you confirm
+that your use of SpliceAI complies with these terms. Commercial use
+requires a license from Illumina (AI_licensing@illumina.com).
+
+TERMS OF USE
+
+This software is provided for academic and research use only, without
+warranty of any kind, express or implied. It is not a diagnostic tool, and
+its output must not be used for clinical decision-making without
+independent verification by qualified personnel. The developer assumes no
+liability for any use of this software or reliance on its output.
+
+The full third-party license texts are available in the program
+("Read the full license..." on the start screen).

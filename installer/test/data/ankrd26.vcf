@@ -1,0 +1,4 @@
+##fileformat=VCFv4.2
+##contig=<ID=chr10>
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+chr10	27326999	.	T	C	.	.	.
