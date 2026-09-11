@@ -18,3 +18,4 @@ installer/thirdparty/
 installer/build/
 installer/output/
 installer/test/results/
+tests/.cache/
