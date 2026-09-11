@@ -239,6 +239,26 @@ Files: `spliceai_pipeline/normalize.py`, `vcfio.py`, `score.py`, `snpeff.py`,
 - Files: `spliceai_gui/vcf_info.py` (`detect_vcf_build`), `main_window.py`,
   `config.py`, `download_dialog.py`, `reference_note.py`.
 
+**Run controls, MANE folder, SpliceAI check, scrolling (2026-09-11).**
+
+- **Pause / Resume and End** next to Run, enabled only during a run. The pipeline
+  checks in between variants (`spliceai_pipeline/control.py`), so a pause takes
+  effect after the current variant; End stops at the next one -- or at once while
+  SnpEff runs (its Java process is killed; SnpEff now runs via a polled Popen
+  instead of `subprocess.run`). An ended run keeps no results.
+- **Closing during a run** asks "The calculation is not finished yet. Are you sure
+  you want to exit?"; Yes stops the run cleanly before the window closes.
+- **CPU display** during a run: this program's share of the processor, the whole
+  PC's, and the elapsed time (`spliceai_gui/cpu_meter.py`, standard library only).
+- **MANE Select folder** field with Browse... (checks it's a MANE summary file);
+  remembered, passed to the run, and used as the download destination. The status
+  says whether the file is found there.
+- **SpliceAI button always shown**: green "SpliceAI found · Check" opens a check of
+  the install (version, location, where it came from, all 5 model and 2 annotation
+  files present); red when missing, opening the install dialog.
+- **The whole window scrolls**, so small screens work; the window also starts no
+  bigger than the screen, and the results table keeps a usable minimum height.
+
 ## Still open
 
 **First-run check of the PC's prerequisites.** The reference genome, SnpEff

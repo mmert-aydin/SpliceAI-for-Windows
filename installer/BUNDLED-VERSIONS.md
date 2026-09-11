@@ -122,7 +122,7 @@ vcruntime140_threads.dll  18186DD0AF0E8CB6B0111ADB585AD70DD555C1C6950ECA7BA3A490
 | | |
 |---|---|
 | Setup.exe | `SpliceAI-VariantScoring-Setup-1.0.0.exe` |
-| Size | 1,412,618,904 bytes (1.35 GB; LZMA2 ultra64, solid) |
-| SHA-256 | `5F2BA552EEBC0A526D15A9581F4CB1B340CE923EB70E40400F4B2C052CCDBD7F` |
-| Includes | the pipeline fixes and the automatic build selection of 2026-09-11 (see README) |
+| Size | 1,412,609,799 bytes (1.35 GB; LZMA2 ultra64, solid) |
+| SHA-256 | `16ADCDB6716A166184035B76F8917C8FA29993E5AD0FC35E9D8A1490F4531260` |
+| Includes | the pipeline fixes, automatic build selection, and run controls / MANE folder / SpliceAI check / scrolling of 2026-09-11 (see README) |
 | Installed size | app 1.30 GB + SnpEff/Java/MANE ~1.3 GB + SpliceAI 25 MB |

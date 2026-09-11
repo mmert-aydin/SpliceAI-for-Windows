@@ -91,6 +91,12 @@ def fetch_mane_summary(dest_dir=None, opener=None):
     return dest_path
 
 
+def is_summary_filename(path):
+    """True for a MANE summary file name, e.g. MANE.GRCh38.v1.5.summary.txt.gz
+    -- the only kind find_cached_summary() picks up."""
+    return bool(_SUMMARY_FILENAME_RE.fullmatch(os.path.basename(path)))
+
+
 def find_cached_summary(mane_dir=None):
     """Returns the path to an already-downloaded summary file under mane_dir,
     or None if none is present. Doesn't download anything."""

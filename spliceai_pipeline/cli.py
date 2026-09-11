@@ -107,8 +107,11 @@ def parse_args(argv=None):
 
 def run_pipeline_core(vcf_path, build, mode, fasta_path, precomputed_dir=None, skip_precomputed=False,
                       use_snpeff=False, snpeff_dir=None, mane_dir=None,
-                      on_progress=None):
+                      on_progress=None, control=None):
     """Normalize -> lookup (if precomputed_dir given) -> live-score -> merge.
+
+    control: optional control.RunControl -- pause/end from the GUI, checked
+    between variants; an ended run raises control.RunCancelled.
 
     Returns a list of merge.ScoreRow. Writing the output table is left to the
     caller (see write_rows) so this can be reused by a GUI that wants the rows
@@ -124,6 +127,10 @@ def run_pipeline_core(vcf_path, build, mode, fasta_path, precomputed_dir=None, s
             on_progress(message, current, total)
         else:
             print(message, flush=True)
+
+    def checkpoint():
+        if control is not None:
+            control.check()
 
     # Seconds spent in each phase, reported in the final "Done" message.
     # (Original comments weren't recoverable from the compiled program; blank and
@@ -147,6 +154,7 @@ def run_pipeline_core(vcf_path, build, mode, fasta_path, precomputed_dir=None, s
     normalized = []
     contigs = set(fasta.keys())
     for chrom, pos, ref, alts, allele_fractions in read_vcf_records(vcf_path):
+        checkpoint()
         normalized.extend(normalize_record(fasta, chrom, pos, ref, alts, allele_fractions, contigs=contigs))
     phase_seconds["normalize"] = time.time() - t0
     progress(f"  {len(normalized)} variant alleles after splitting multi-allelic records")
@@ -158,6 +166,7 @@ def run_pipeline_core(vcf_path, build, mode, fasta_path, precomputed_dir=None, s
         # requested, rather than at the top of the file.
         # (Original comments weren't recoverable from the compiled program; blank and
         # comment lines like these keep line numbers where they were.)
+        checkpoint()
         progress("Running SnpEff annotation...")
         from .snpeff import JavaNotFoundError, SnpEffNotSetUpError, run_snpeff_annotation
         t0 = time.time()
@@ -166,6 +175,7 @@ def run_pipeline_core(vcf_path, build, mode, fasta_path, precomputed_dir=None, s
             snpeff_annotations = run_snpeff_annotation(
                 unique_variants, build, snpeff_dir=snpeff_dir, mane_dir=mane_dir,
                 on_progress=lambda m: progress(f"  {m}"),
+                should_cancel=(lambda: control.cancelled) if control is not None else None,
             )
         except (JavaNotFoundError, SnpEffNotSetUpError, RuntimeError) as exc:
             # On these errors the run continues without SnpEff annotations
@@ -183,6 +193,7 @@ def run_pipeline_core(vcf_path, build, mode, fasta_path, precomputed_dir=None, s
         n_found = 0
         t_start = time.time()
         for n, v in enumerate(normalized, 1):
+            checkpoint()
             hit = None if v.skip_reason else precomputed.lookup(v.chrom, v.pos, v.ref, v.alt)
             if hit is not None:
                 n_found += 1
@@ -214,6 +225,7 @@ def run_pipeline_core(vcf_path, build, mode, fasta_path, precomputed_dir=None, s
         t_start = time.time()
         for n, idx in enumerate(to_live_score, 1):
             v = normalized[idx]
+            checkpoint()
             try:
                 live_results[idx], reason = scorer.score_with_reason(v.chrom, v.pos, v.ref, v.alt)
             except Exception as exc:

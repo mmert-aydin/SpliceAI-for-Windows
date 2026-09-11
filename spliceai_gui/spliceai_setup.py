@@ -198,6 +198,47 @@ def run_install(argv, on_line=None):
     return proc.returncode, "".join(lines)
 
 
+def check_installation():
+    """Details for the "SpliceAI found" button, without importing SpliceAI
+    (see is_spliceai_installed): None if it isn't installed, else a dict with
+    its version, folder, where it came from, and any missing model or gene
+    annotation files -- a partial install can't live-score."""
+    try:
+        spec = importlib.util.find_spec("spliceai")
+    except (ImportError, ValueError):
+        spec = None
+    if spec is None or not spec.origin:
+        return None
+    pkg_dir = os.path.dirname(spec.origin)
+    parent = os.path.dirname(pkg_dir)
+    version = None
+    try:
+        for name in os.listdir(parent):
+            if name.lower().startswith("spliceai-") and name.endswith(".dist-info"):
+                version = name[len("spliceai-"):-len(".dist-info")]
+    except OSError:
+        pass
+    models = [f"spliceai{i}.h5" for i in range(1, 6)]
+    annotations = ["grch37.txt", "grch38.txt"]
+    here = os.path.normcase(os.path.abspath(pkg_dir))
+    if bundle_dir() and here.startswith(os.path.normcase(os.path.abspath(bundle_dir()))):
+        origin = "installed by Setup, with the program"
+    elif here.startswith(os.path.normcase(os.path.abspath(PACKAGES_DIR))):
+        origin = "installed from within the program"
+    else:
+        origin = "installed in this Python environment"
+    return {
+        "version": version,
+        "location": pkg_dir,
+        "origin": origin,
+        "missing_models": [m for m in models if not os.path.isfile(os.path.join(pkg_dir, "models", m))],
+        "missing_annotations": [a for a in annotations
+                                if not os.path.isfile(os.path.join(pkg_dir, "annotations", a))],
+        "n_models": len(models),
+        "n_annotations": len(annotations),
+    }
+
+
 class WheelInstallError(Exception):
     pass
 

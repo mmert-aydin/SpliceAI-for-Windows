@@ -29,6 +29,7 @@ DEFAULTS = {
     "last_reference_download_dir": "",
     "column_order": [],
     "snpeff_dir": "",
+    "mane_dir": "",
     "use_snpeff": False,
     "hide_reference_note": False,
 }

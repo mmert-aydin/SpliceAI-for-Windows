@@ -38,6 +38,7 @@ import sys
 import tempfile
 
 from .app_paths import app_root_dir
+from .control import RunCancelled
 
 # Default install root: a "snpeff" folder next to the app (see
 # app_paths.app_root_dir()); the jar and databases live in its "snpEff"
@@ -312,7 +313,8 @@ def _gene_annotations(info_field, mane_select):
     return result
 
 
-def run_snpeff_annotation(variants, build, snpeff_dir=None, java_exe=None, mane_dir=None, on_progress=None):
+def run_snpeff_annotation(variants, build, snpeff_dir=None, java_exe=None, mane_dir=None, on_progress=None,
+                          should_cancel=None):
     """variants: iterable of (chrom, pos, ref, alt) tuples (normalized
     representation, deduplicated by the caller if needed).
     snpeff_dir: install root (see module docstring); defaults to
@@ -365,13 +367,27 @@ def run_snpeff_annotation(variants, build, snpeff_dir=None, java_exe=None, mane_
 
         progress(f"Running SnpEff ({db}) on {len(variants)} variant(s)...")
         cmd = [java_exe, *JAVA_LOCALE_ARGS, "-Xmx4g", "-jar", jar_path, "-noStats", "-noLog", db, in_vcf]
-        with open(out_vcf, "w", encoding="utf-8") as out_fh:
-            result = subprocess.run(
-                cmd, stdout=out_fh, stderr=subprocess.PIPE, text=True, cwd=os.path.dirname(jar_path),
-                **SUBPROCESS_NO_WINDOW,
+        err_path = os.path.join(tmpdir, "snpeff_stderr.txt")
+        # Polled rather than subprocess.run(), so ending the run (should_cancel)
+        # stops SnpEff at once; stderr goes to a file, so a chatty SnpEff can
+        # never fill a pipe and hang.
+        with open(out_vcf, "w", encoding="utf-8") as out_fh, open(err_path, "w", encoding="utf-8") as err_fh:
+            proc = subprocess.Popen(
+                cmd, stdout=out_fh, stderr=err_fh, cwd=os.path.dirname(jar_path), **SUBPROCESS_NO_WINDOW,
             )
-        if result.returncode != 0:
-            raise RuntimeError(f"SnpEff failed (exit {result.returncode}): {(result.stderr or '')[-2000:]}")
+            while True:
+                try:
+                    proc.wait(timeout=0.3)
+                    break
+                except subprocess.TimeoutExpired:
+                    if should_cancel and should_cancel():
+                        proc.kill()
+                        proc.wait()
+                        raise RunCancelled("Run ended by the user.")
+        if proc.returncode != 0:
+            with open(err_path, encoding="utf-8", errors="replace") as fh:
+                stderr = fh.read()
+            raise RuntimeError(f"SnpEff failed (exit {proc.returncode}): {stderr[-2000:]}")
 
         annotations = {}
         with open(out_vcf, encoding="utf-8") as fh:

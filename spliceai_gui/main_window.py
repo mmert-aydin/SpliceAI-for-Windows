@@ -11,13 +11,14 @@ import time
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QFileDialog,
+    QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame,
     QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QPlainTextEdit,
-    QProgressBar, QPushButton, QRadioButton, QStyle, QTableView, QToolButton, QVBoxLayout, QWidget,
+    QProgressBar, QPushButton, QRadioButton, QScrollArea, QStyle, QTableView, QToolButton, QVBoxLayout,
+    QWidget,
 )
 
 from spliceai_pipeline.cli import BUILDS, MODES, format_elapsed
-from spliceai_pipeline.mane import DEFAULT_MANE_DIR, find_cached_summary
+from spliceai_pipeline.mane import DEFAULT_MANE_DIR, find_cached_summary, is_summary_filename
 from spliceai_pipeline.snpeff import (
     DEFAULT_SNPEFF_DIR, JavaNotFoundError, SnpEffNotSetUpError, check_snpeff_setup, find_java, snpeff_jar_path,
 )
@@ -27,6 +28,7 @@ from spliceai_pipeline.writer import ResultsFileError, read_rows, write_rows_ord
 from . import config
 from . import spliceai_setup
 from .assets_paths import LOGO_PNG
+from .cpu_meter import CpuMeter
 from .download_dialog import ReferenceDownloadDialog
 from .gene_import_dialog import GeneImportDialog
 from .mane_download_dialog import ManeDownloadDialog
@@ -39,6 +41,9 @@ from .vcf_info import detect_vcf_build, summarize_vcf_text
 from .worker import PipelineWorker
 
 ABOUT_DIALOG_LOGO_SIZE = 72
+
+# Shown in front of the progress text while a run is paused.
+PAUSED_PREFIX = "⏸ Paused -- "
 
 THRESHOLDS = (0.2, 0.5, 0.8)
 
@@ -364,6 +369,12 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("SpliceAI Variant Scoring")
         self.resize(1200, 800)
+        # Start no bigger than the screen; on a small one everything scrolls
+        # (see _build_ui).
+        screen = QApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            self.resize(min(1200, available.width() - 40), min(800, available.height() - 60))
         if LOGO_PNG.exists():
             self.setWindowIcon(QIcon(str(LOGO_PNG)))
 
@@ -396,8 +407,9 @@ class MainWindow(QMainWindow):
     # (Original comments weren't recoverable from the compiled program; blank and
     # comment lines like these keep line numbers where they were.)
     def _build_ui(self):
+        # Everything sits in one scroll area, so the window still works on a
+        # small screen (or a small window): it scrolls instead of squeezing.
         central = QWidget()
-        self.setCentralWidget(central)
         root = QVBoxLayout(central)
 
         root.addLayout(self._build_top_bar())
@@ -405,6 +417,15 @@ class MainWindow(QMainWindow):
         root.addWidget(self._build_options_group())
         root.addLayout(self._build_run_row())
         root.addWidget(self._build_results_group(), stretch=1)
+        # The results table keeps a usable height; when space runs out the
+        # page scrolls rather than shrinking it to a few rows.
+        self.table_view.setMinimumHeight(260)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(central)
+        self.setCentralWidget(scroll)
 
     def _make_help_button(self, dialog_title, help_text, font_size="10pt", logo=False):
         """A small clickable "(?)" icon that pops up an explanation on click --
@@ -469,14 +490,59 @@ class MainWindow(QMainWindow):
         return row
 
     def _update_spliceai_status_indicator(self):
-        installed = spliceai_setup.is_spliceai_installed()
-        self.spliceai_status_button.setVisible(not installed)
-        if not installed:
-            self.spliceai_status_button.setText("⚠ SpliceAI not installed -- live scoring unavailable")
+        """Always shown: green when SpliceAI is found (click to check it), red
+        when it isn't (click to install it)."""
+        if spliceai_setup.is_spliceai_installed():
+            text, color = "✓ SpliceAI found · Check", "#1a7f37"
+            tip = "SpliceAI is installed. Click to see its version and location, and whether all its files are there."
+        else:
+            text, color = "⚠ SpliceAI not installed -- live scoring unavailable", "#b00020"
+            tip = "Click to install SpliceAI."
+        self.spliceai_status_button.setText(text)
+        self.spliceai_status_button.setToolTip(tip)
+        self.spliceai_status_button.setStyleSheet(f"QPushButton {{ color: {color}; font-weight: bold; }}")
+        self.spliceai_status_button.setVisible(True)
 
     def _on_spliceai_status_clicked(self):
-        SpliceAISetupDialog(self).exec()
+        if spliceai_setup.is_spliceai_installed():
+            self._show_spliceai_check()
+        else:
+            SpliceAISetupDialog(self).exec()
         self._update_spliceai_status_indicator()
+
+    def _show_spliceai_check(self):
+        info = spliceai_setup.check_installation()
+        if info is None:
+            SpliceAISetupDialog(self).exec()
+            return
+        models_found = info["n_models"] - len(info["missing_models"])
+        annotations_found = info["n_annotations"] - len(info["missing_annotations"])
+        lines = [
+            f"SpliceAI {info['version'] or '(version unknown)'} -- {info['origin']}.",
+            "",
+            f"Location: {info['location']}",
+            f"Model files (spliceai1-5.h5): {models_found} of {info['n_models']} found",
+            f"Gene annotation files (grch37, grch38): {annotations_found} of {info['n_annotations']} found",
+            "",
+        ]
+        box = QMessageBox(self)
+        box.setWindowTitle("SpliceAI check")
+        missing = info["missing_models"] + info["missing_annotations"]
+        if missing:
+            box.setIcon(QMessageBox.Warning)
+            lines.append(f"⚠ Missing: {', '.join(missing)}. Live scoring won't work until SpliceAI is reinstalled.")
+            reinstall = box.addButton("Open SpliceAI setup...", QMessageBox.ActionRole)
+        else:
+            box.setIcon(QMessageBox.Information)
+            lines.append("✓ Everything live scoring needs is in place.")
+            if info["version"] and info["version"] != spliceai_setup.SPLICEAI_VERSION:
+                lines.append(f"(This program is tested with SpliceAI {spliceai_setup.SPLICEAI_VERSION}.)")
+            reinstall = None
+        box.setText("\n".join(lines))
+        box.addButton(QMessageBox.Ok)
+        box.exec()
+        if reinstall is not None and box.clickedButton() is reinstall:
+            SpliceAISetupDialog(self).exec()
 
     def _build_input_group(self):
         group = QGroupBox("Input VCF")
@@ -664,8 +730,17 @@ class MainWindow(QMainWindow):
         snpeff_config_layout.addLayout(snpeff_row)
 
         mane_row = QHBoxLayout()
-        mane_row.addWidget(QLabel("MANE Select data (optional -- improves transcript choice):"))
-        mane_row.addStretch(1)
+        mane_row.addWidget(QLabel("MANE Select folder (optional -- improves transcript choice):"))
+        # Where the MANE summary file is -- empty means the program's own
+        # "mane" folder (DEFAULT_MANE_DIR). Passed to the run (worker.py).
+        self.mane_dir_edit = QLineEdit()
+        self.mane_dir_edit.setPlaceholderText(DEFAULT_MANE_DIR)
+        self.mane_dir_edit.textChanged.connect(self._update_mane_status_label)
+        mane_row.addWidget(self.mane_dir_edit, stretch=1)
+        mane_browse = QPushButton("Browse...")
+        mane_browse.setToolTip("Select a MANE summary file you already have (MANE.GRCh38.vX.X.summary.txt.gz)")
+        mane_browse.clicked.connect(self._on_browse_mane_file)
+        mane_row.addWidget(mane_browse)
         self.download_mane_button = QPushButton("Download MANE Select...")
         self.download_mane_button.clicked.connect(self._on_download_mane)
         mane_row.addWidget(self.download_mane_button)
@@ -686,6 +761,18 @@ class MainWindow(QMainWindow):
         self.run_button.clicked.connect(self._on_run_clicked)
         row.addWidget(self.run_button)
 
+        # Only enabled while a run is going (see _set_running).
+        self.pause_button = QPushButton("Pause")
+        self.pause_button.setToolTip("Pause the calculation after the current variant; click again to resume.")
+        self.pause_button.setEnabled(False)
+        self.pause_button.clicked.connect(self._on_pause_clicked)
+        row.addWidget(self.pause_button)
+        self.end_button = QPushButton("End")
+        self.end_button.setToolTip("End the calculation now (its results are discarded).")
+        self.end_button.setEnabled(False)
+        self.end_button.clicked.connect(self._on_end_clicked)
+        row.addWidget(self.end_button)
+
         self.summary_button = QPushButton("Summary")
         self.summary_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon))
         self.summary_button.setToolTip("Quick statistics for the most recently completed run (full result set, not the filtered/paginated view).")
@@ -700,6 +787,19 @@ class MainWindow(QMainWindow):
 
         self.progress_label = QLabel("")
         row.addWidget(self.progress_label, stretch=2)
+
+        # CPU use while a run is going (see cpu_meter.py and _update_cpu_label).
+        self.cpu_label = QLabel("")
+        self.cpu_label.setToolTip(
+            "CPU use: this program's share of the whole processor, the whole computer's "
+            "(including SnpEff's Java), and the time since the run started."
+        )
+        self.cpu_label.setVisible(False)
+        row.addWidget(self.cpu_label)
+        self._cpu_meter = CpuMeter()
+        self._cpu_timer = QTimer(self)
+        self._cpu_timer.setInterval(1000)
+        self._cpu_timer.timeout.connect(self._update_cpu_label)
         return row
 
     def _build_results_group(self):
@@ -855,6 +955,7 @@ class MainWindow(QMainWindow):
             edit.setText(settings[config.fasta_key(build)])
         self.precomputed_dir_edit.setText(settings["precomputed_dir"])
         self.snpeff_dir_edit.setText(settings["snpeff_dir"])
+        self.mane_dir_edit.setText(settings["mane_dir"])
         self.use_snpeff_checkbox.setChecked(settings["use_snpeff"])
         self.skip_precomputed_checkbox.setChecked(settings["skip_precomputed"])
         if settings["build"] in BUILDS:
@@ -891,6 +992,7 @@ class MainWindow(QMainWindow):
             "skip_precomputed": self.skip_precomputed_checkbox.isChecked(),
             "column_order": self._current_column_order(),
             "snpeff_dir": self.snpeff_dir_edit.text().strip(),
+            "mane_dir": self.mane_dir_edit.text().strip(),
             "use_snpeff": self.use_snpeff_checkbox.isChecked(),
         })
         config.save(settings)
@@ -921,6 +1023,27 @@ class MainWindow(QMainWindow):
                 header.moveSection(current_visual, visual_pos)
 
     def closeEvent(self, event):
+        if self._worker is not None and self._worker.isRunning():
+            reply = QMessageBox.warning(
+                self, "Calculation still running",
+                "The calculation is not finished yet. Are you sure you want to exit?\n\n"
+                "The run will be stopped and its results discarded.",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                event.ignore()
+                return
+            # Stops at the next variant (SnpEff is killed at once); a thread
+            # still running when the window goes would crash the program.
+            self.progress_label.setText("Stopping the calculation...")
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            try:
+                self._worker.stop()
+                if not self._worker.wait(60000):
+                    self._worker.terminate()
+                    self._worker.wait(5000)
+            finally:
+                QApplication.restoreOverrideCursor()
         self._save_settings()
         self._cleanup_temp_vcf()
         super().closeEvent(event)
@@ -1223,23 +1346,40 @@ class MainWindow(QMainWindow):
             self.snpeff_status_label.setStyleSheet("color: #5f5f5f; font-weight: bold;")
             self.snpeff_status_label.setToolTip(detail)
 
+    def _mane_dir(self):
+        return self.mane_dir_edit.text().strip() or DEFAULT_MANE_DIR
+
     def _update_mane_status_label(self):
-        # (Original comments weren't recoverable from the compiled program; blank and
-        # comment lines like these keep line numbers where they were.)
-        #
-        # Only DEFAULT_MANE_DIR is checked (via find_cached_summary) -- the MANE
-        # row has no folder field of its own, unlike SnpEff's install-folder
-        # row.
-        if find_cached_summary(DEFAULT_MANE_DIR):
-            self.mane_status_label.setText("✓ Downloaded")
+        """Whether the MANE folder (field, or the default) has a summary file
+        the run will find -- the same lookup the pipeline does."""
+        mane_dir = self._mane_dir()
+        path = find_cached_summary(mane_dir)
+        if path:
+            # Short, so it fits a small window; the full path is the tooltip.
+            version = os.path.basename(path).split(".summary")[0].rsplit(".v", 1)[-1]
+            self.mane_status_label.setText(f"✓ Found (MANE v{version})")
             self.mane_status_label.setStyleSheet("color: #1a7f37; font-weight: bold;")
-            self.mane_status_label.setToolTip("")
+            self.mane_status_label.setToolTip(path)
         else:
-            # (Original comments weren't recoverable from the compiled program; blank and
-            # comment lines like these keep line numbers where they were.)
-            self.mane_status_label.setText("Not downloaded")
+            self.mane_status_label.setText("Not found")
             self.mane_status_label.setStyleSheet("color: #5f5f5f; font-weight: bold;")
-            self.mane_status_label.setToolTip(f"Looked for a cached summary under {DEFAULT_MANE_DIR}")
+            self.mane_status_label.setToolTip(f"No MANE.GRCh38.vX.X.summary.txt.gz in {mane_dir}")
+
+    def _on_browse_mane_file(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select the MANE Select summary file", self._mane_dir(),
+            "MANE summary (MANE.GRCh38.v*.summary.txt.gz);;All files (*)",
+        )
+        if not path:
+            return
+        if not is_summary_filename(path):
+            QMessageBox.warning(
+                self, "Not a MANE summary file",
+                f"{os.path.basename(path)} isn't a MANE summary file.\n\nExpected a name like "
+                "MANE.GRCh38.v1.5.summary.txt.gz (from ftp.ncbi.nlm.nih.gov/refseq/MANE).",
+            )
+            return
+        self.mane_dir_edit.setText(os.path.dirname(path))
 
     def _on_use_snpeff_toggled(self, checked):
         self.snpeff_config_widget.setVisible(checked)
@@ -1255,7 +1395,7 @@ class MainWindow(QMainWindow):
         self._update_run_enabled()
 
     def _on_download_mane(self):
-        dialog = ManeDownloadDialog(self)
+        dialog = ManeDownloadDialog(self, dest_dir=self._mane_dir())
         dialog.exec()
         self._update_mane_status_label()
 
@@ -1487,11 +1627,14 @@ class MainWindow(QMainWindow):
             skip_precomputed=self.skip_precomputed_checkbox.isChecked(),
             use_snpeff=self.use_snpeff_checkbox.isChecked(),
             snpeff_dir=self.snpeff_dir_edit.text().strip(),
+            mane_dir=self.mane_dir_edit.text().strip(),
         )
         self._worker.progress.connect(self._on_worker_progress)
         self._worker.finished_ok.connect(self._on_worker_finished)
         self._worker.failed.connect(self._on_worker_failed)
+        self._worker.cancelled.connect(self._on_worker_cancelled)
         self._worker.start()
+        self._set_running(True)
 
     def _on_worker_progress(self, message, current, total):
         if total:
@@ -1499,6 +1642,8 @@ class MainWindow(QMainWindow):
             self.progress_bar.setValue(current or 0)
         else:
             self.progress_bar.setRange(0, 0)
+        if self._worker is not None and self._worker.control.paused:
+            message = PAUSED_PREFIX + message
         self.progress_label.setText(message)
 
     def _on_worker_finished(self, rows):
@@ -1508,6 +1653,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(1)
         self.progress_label.setText(f"Done -- {len(rows)} rows.")
         self._worker = None
+        self._set_running(False)
         if self._run_start_time is not None:
             self._last_run_duration = time.time() - self._run_start_time
             self._run_start_time = None
@@ -1519,10 +1665,72 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(0)
         self.progress_label.setText("Failed.")
         self._worker = None
+        self._set_running(False)
         self._update_spliceai_status_indicator()
         self._run_start_time = None
         self._update_run_enabled()
         QMessageBox.critical(self, "Pipeline error", message)
+
+    def _on_worker_cancelled(self):
+        self.progress_bar.setRange(0, 1)
+        self.progress_bar.setValue(0)
+        self.progress_label.setText("Run ended -- no results.")
+        self._worker = None
+        self._set_running(False)
+        self._run_start_time = None
+        self._update_run_enabled()
+
+    def _set_running(self, running):
+        """Pause/End and the CPU display are only live during a run."""
+        self.pause_button.setText("Pause")
+        self.pause_button.setEnabled(running)
+        self.end_button.setEnabled(running)
+        self.cpu_label.setVisible(running)
+        if running:
+            self.cpu_label.setText("")
+            self._cpu_meter.reset()
+            self._cpu_timer.start()
+        else:
+            self._cpu_timer.stop()
+
+    def _on_pause_clicked(self):
+        if self._worker is None:
+            return
+        control = self._worker.control
+        if control.paused:
+            control.resume()
+            self.pause_button.setText("Pause")
+            self.progress_label.setText(self.progress_label.text().replace(PAUSED_PREFIX, ""))
+        else:
+            control.pause()
+            self.pause_button.setText("Resume")
+            self.progress_label.setText(PAUSED_PREFIX + self.progress_label.text())
+
+    def _on_end_clicked(self):
+        if self._worker is None:
+            return
+        reply = QMessageBox.question(
+            self, "End the calculation?",
+            "End this calculation now? The variants scored so far are discarded.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes or self._worker is None:
+            return
+        self._worker.stop()
+        self.pause_button.setEnabled(False)
+        self.end_button.setEnabled(False)
+        self.progress_label.setText("Ending the calculation...")
+
+    def _update_cpu_label(self):
+        app_pct, pc_pct = self._cpu_meter.sample()
+        if app_pct is None:
+            return
+        text = f"CPU: this program {app_pct:.0f}%"
+        if pc_pct is not None:
+            text += f" · whole PC {pc_pct:.0f}%"
+        if self._run_start_time is not None:
+            text += f" · {format_elapsed(time.time() - self._run_start_time)}"
+        self.cpu_label.setText(text)
 
     def _build_summary_text(self):
         """Statistics for the full result set of the most recently completed run

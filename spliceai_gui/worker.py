@@ -7,6 +7,7 @@ is reimplemented here, just Qt signal plumbing around it.
 from PySide6.QtCore import QThread, Signal
 
 from spliceai_pipeline.cli import ReferenceMismatchError, run_pipeline_core
+from spliceai_pipeline.control import RunCancelled, RunControl
 
 from .spliceai_setup import display_install_command, is_frozen
 
@@ -38,9 +39,10 @@ class PipelineWorker(QThread):
     progress = Signal(str, object, object)
     finished_ok = Signal(list)
     failed = Signal(str)
+    cancelled = Signal()
 
     def __init__(self, vcf_path, build, mode, fasta_path, precomputed_dir, skip_precomputed,
-                 use_snpeff=False, snpeff_dir=None, parent=None):
+                 use_snpeff=False, snpeff_dir=None, mane_dir=None, parent=None):
         super().__init__(parent)
         self.vcf_path = vcf_path
         self.build = build
@@ -50,6 +52,18 @@ class PipelineWorker(QThread):
         self.skip_precomputed = skip_precomputed
         self.use_snpeff = use_snpeff
         self.snpeff_dir = snpeff_dir
+        self.mane_dir = mane_dir
+        # The GUI's Pause/End buttons (see spliceai_pipeline.control).
+        self.control = RunControl()
+
+    def pause(self):
+        self.control.pause()
+
+    def resume(self):
+        self.control.resume()
+
+    def stop(self):
+        self.control.cancel()
 
     def run(self):
         try:
@@ -62,9 +76,13 @@ class PipelineWorker(QThread):
                 skip_precomputed=self.skip_precomputed,
                 use_snpeff=self.use_snpeff,
                 snpeff_dir=self.snpeff_dir or None,
+                mane_dir=self.mane_dir or None,
                 on_progress=on_progress,
+                control=self.control,
             )
             self.finished_ok.emit(rows)
+        except RunCancelled:
+            self.cancelled.emit()
         except ReferenceMismatchError as exc:
             # Already written for the user (wrong build / wrong FASTA).
             self.failed.emit(str(exc))
