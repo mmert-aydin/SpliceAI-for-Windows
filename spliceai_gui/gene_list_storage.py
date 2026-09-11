@@ -16,7 +16,8 @@ def load_all():
     if not STORAGE_PATH.exists():
         return {}
     try:
-        data = json.loads(STORAGE_PATH.read_text(encoding="utf-8"))
+        # utf-8-sig: also reads a file saved with a byte-order mark (see config.py).
+        data = json.loads(STORAGE_PATH.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return {}
     if not isinstance(data, dict):

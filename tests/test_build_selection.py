@@ -18,7 +18,8 @@ HG19, HG38 = str(helpers.HG19), str(helpers.HG38)
 
 # Settings as an older version left them: one FASTA field, pointing at hg38.fa.
 os.makedirs(home / ".spliceai_gui")
-with open(home / ".spliceai_gui" / "config.json", "w") as fh:
+# Written with a byte-order mark, as some Windows editors do: it must still be read.
+with open(home / ".spliceai_gui" / "config.json", "w", encoding="utf-8-sig") as fh:
     json.dump({"fasta_path": HG38, "build": "hg38", "precomputed_mode": "none"}, fh)
 
 from pyfaidx import Fasta  # noqa: E402
@@ -65,6 +66,7 @@ def settle(seconds=0.6):
 
 
 settle()
+check("a settings file saved with a byte-order mark is read", w.fasta_edits["hg38"].text() == HG38)
 check("an old single FASTA setting moves to the hg38 row",
       w.fasta_edits["hg38"].text() == HG38 and w.fasta_edits["hg19"].text() == "")
 check("the hg38 row is marked as used", "(used for this run)" in w.fasta_row_labels["hg38"].text()
@@ -82,8 +84,13 @@ check("the selected build's FASTA is the one used", w._selected_fasta() == HG19)
 # An hg38 VCF known only by chr1's length (no ##reference line), loaded from a file.
 hg38_vcf = helpers.write_vcf(helpers.snv_lines(Fasta(HG38, rebuild=False), "chr1", [1_000_000, 2_000_000]),
                              ["##contig=<ID=chr1,length=248956422>"])
+with open(hg38_vcf, "rb") as fh:  # saved with a byte-order mark, as some editors do
+    raw = fh.read()
+with open(hg38_vcf, "wb") as fh:
+    fh.write(b"\xef\xbb\xbf" + raw)
 w._load_vcf_from_path(hg38_vcf)
 settle()
+check("a VCF file saved with a byte-order mark loads without it", w.vcf_text.toPlainText().startswith("##fileformat"))
 check("loading an hg38 VCF (known by chr1's length) selects hg38", w.build_combo.currentText() == "hg38",
       w.build_source_label.text())
 check("...and uses the hg38 FASTA", w._selected_fasta() == HG38)

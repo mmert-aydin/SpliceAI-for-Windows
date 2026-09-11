@@ -12,7 +12,13 @@ from .allele_fraction import extract_allele_fractions
 
 
 def _opener(path):
-    return gzip.open(path, "rt") if path.endswith((".gz", ".bgz")) else open(path, "rt")
+    # utf-8-sig: a VCF saved "UTF-8 with BOM" (some Windows editors) would
+    # otherwise start with an invisible character that turns its first header
+    # line into a broken data record and stops the run. errors="replace":
+    # header text in some other encoding can't stop a run either.
+    if path.endswith((".gz", ".bgz")):
+        return gzip.open(path, "rt", encoding="utf-8-sig", errors="replace")
+    return open(path, "rt", encoding="utf-8-sig", errors="replace")
 
 
 def read_vcf_records(path):

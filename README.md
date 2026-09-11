@@ -259,6 +259,15 @@ Files: `spliceai_pipeline/normalize.py`, `vcfio.py`, `score.py`, `snpeff.py`,
 - **The whole window scrolls**, so small screens work; the window also starts no
   bigger than the screen, and the results table keeps a usable minimum height.
 
+**Files saved "with BOM" are read normally (2026-09-11).** Some Windows editors
+(and Windows PowerShell) write UTF-8 with an invisible byte-order mark. Before,
+such a `config.json` or gene-list file was silently ignored (all settings back to
+defaults), and such a VCF stopped the run (its first header line was taken for a
+broken record). Settings, gene lists and VCFs are now read as `utf-8-sig`; VCFs
+also replace undecodable header characters instead of failing. Files:
+`spliceai_gui/config.py`, `gene_list_storage.py`, `main_window.py`,
+`spliceai_pipeline/vcfio.py`; checks in `tests/`.
+
 ## Still open
 
 **First-run check of the PC's prerequisites.** The reference genome, SnpEff

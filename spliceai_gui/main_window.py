@@ -304,7 +304,9 @@ def _read_vcf_text(path):
     # comment lines like these keep line numbers where they were.)
     try:
         opener = gzip.open if is_gz else open
-        with opener(path, "rt", encoding="utf-8") as fh:
+        # utf-8-sig: drops a byte-order mark, which would otherwise sit in front
+        # of the first header line (see spliceai_pipeline/vcfio.py).
+        with opener(path, "rt", encoding="utf-8-sig") as fh:
             return fh.read()
     except gzip.BadGzipFile as exc:
         raise RuntimeError(f"file looked gzip-compressed (magic bytes 1f 8b) but failed to decompress: {exc}") from exc

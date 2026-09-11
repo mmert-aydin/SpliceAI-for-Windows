@@ -68,7 +68,10 @@ def load():
     if not CONFIG_PATH.exists():
         return dict(DEFAULTS)
     try:
-        data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        # utf-8-sig: a file saved with a byte-order mark (some Windows editors,
+        # Windows PowerShell) would otherwise fail to parse, and every setting
+        # would silently fall back to its default.
+        data = json.loads(CONFIG_PATH.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return dict(DEFAULTS)
     merged = dict(DEFAULTS)

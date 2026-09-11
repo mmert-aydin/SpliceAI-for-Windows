@@ -67,6 +67,18 @@ try:
 except Exception as exc:
     check("blank / whitespace-only lines are ignored", False, repr(exc))
 
+# --- a VCF saved with a byte-order mark (some Windows editors) ----------------------
+p = helpers.write_vcf(["chr10\t27326999\t.\tT\tC\t.\t.\t.\n"])
+with open(p, "rb") as fh:
+    raw = fh.read()
+with open(p, "wb") as fh:
+    fh.write(b"\xef\xbb\xbf" + raw)
+try:
+    n = len(list(read_vcf_records(p)))
+    check("a VCF saved with a byte-order mark reads normally", n == 1, f"{n} record(s)")
+except Exception as exc:
+    check("a VCF saved with a byte-order mark reads normally", False, repr(exc))
+
 # --- chromosome names ---------------------------------------------------------------
 contigs = set(hg19.keys())
 check("MT / chrMT / M resolve to hg19's chrM",
