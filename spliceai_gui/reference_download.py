@@ -15,7 +15,8 @@ indexing logic end to end.
 import gzip
 import os
 import time
-import urllib.request
+
+from spliceai_pipeline import net
 
 
 REFERENCE_URLS = {
@@ -77,9 +78,10 @@ def download_file(url, dest_path, on_progress=None, opener=None, should_cancel=N
     auto-sandbox runs a new exe virtualized on its first launch) can refuse.
 
     on_progress(bytes_done, total_bytes_or_None). opener defaults to
-    urllib.request.urlopen; tests can inject a fake to avoid a real network call.
+    net.urlopen (certificates checked by Windows -- see spliceai_pipeline/net.py);
+    tests can inject a fake to avoid a real network call.
     """
-    opener = opener or urllib.request.urlopen
+    opener = opener or net.urlopen
     tmp_path = dest_path if direct else dest_path + ".part"
     try:
         with opener(url) as response:
@@ -104,7 +106,7 @@ def download_file(url, dest_path, on_progress=None, opener=None, should_cancel=N
         raise
     except Exception as exc:
         _remove_if_exists(tmp_path)
-        raise DownloadError(f"Download failed: {exc}") from exc
+        raise DownloadError(net.download_error_message(exc)) from exc
 
 
 def decompress_gz(gz_path, dest_path, on_progress=None, should_cancel=None):

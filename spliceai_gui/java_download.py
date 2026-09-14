@@ -17,6 +17,7 @@ import tempfile
 import urllib.request
 import zipfile
 
+from spliceai_pipeline import net
 from spliceai_pipeline.snpeff import DEFAULT_JAVA_DIR, MIN_JAVA_VERSION, java_major_version, private_java_exe
 
 from .reference_download import DownloadCancelled, DownloadError, download_file
@@ -49,7 +50,7 @@ def _sha256(path):
 def find_jre_package(opener=None):
     """Asks Adoptium for the latest Temurin JRE (MIN_JAVA_VERSION, Windows) and
     returns its package info: {"name", "link", "size", "checksum", ...}."""
-    opener = opener or urllib.request.urlopen
+    opener = opener or net.urlopen
     url = ADOPTIUM_ASSETS_URL.format(version=MIN_JAVA_VERSION, arch=_arch())
     try:
         with opener(_request(url)) as response:

@@ -3,6 +3,7 @@ import sys
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QDialog
 
+from . import theme
 from .assets_paths import LOGO_PNG
 from .first_launch_dialog import FirstLaunchDialog
 from .main_window import MainWindow
@@ -78,14 +79,16 @@ def main():
     # checks for it.
     activate_packages_dir()
     app = QApplication(sys.argv)
+    theme.apply_theme(app)
     configure_app_icon(app)
     accepted = show_first_launch_notice(app)
     if not accepted:
         return 0
     show_spliceai_setup_notice_if_needed(app)
     window = build_and_show_main_window()
-    # Non-blocking: points a fresh install at the reference data it still needs.
-    show_reference_note_if_needed(window)
+    # Non-blocking: points a fresh install at the reference data it still
+    # needs. Skipped when the window found the files by itself.
+    show_reference_note_if_needed(window, window.reference_paths())
     return app.exec()
 
 

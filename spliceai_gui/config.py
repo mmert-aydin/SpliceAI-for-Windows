@@ -28,9 +28,20 @@ DEFAULTS = {
     "skip_precomputed": False,
     "last_reference_download_dir": "",
     "column_order": [],
+    # Set once _migrate has dropped a column order saved before the columns
+    # were reordered; see _migrate.
+    "column_order_v2_applied": False,
+    # Heights of the three draggable panes, as the user last left them.
+    "pane_sizes": [],
     "snpeff_dir": "",
     "mane_dir": "",
-    "use_snpeff": False,
+    # SnpEff comes with Setup, so annotating is the normal case rather than
+    # something to opt into. The window turns it off again if SnpEff can't be
+    # found, so this default can never block a run.
+    "use_snpeff": True,
+    # Set once _migrate has turned the above on for a settings file written
+    # before SnpEff shipped with the program; see _migrate.
+    "snpeff_default_applied": False,
     "hide_reference_note": False,
 }
 
@@ -55,12 +66,28 @@ def guess_build_from_name(path):
 
 
 def _migrate(settings):
-    """Moves an older single "fasta_path" into the per-build key it belongs to
-    -- by its file name, else the build that was selected with it."""
+    """Brings a settings file written by an older version up to date:
+
+    - an older single "fasta_path" moves into the per-build key it belongs to,
+      by its file name, else the build that was selected with it;
+    - "use_snpeff" is turned on once. It used to default to off, because SnpEff
+      was something the user installed separately; it now comes with Setup, so
+      a saved "false" is almost always just that old default rather than a
+      decision. Done once and remembered, so turning it off afterwards sticks.
+    """
     legacy = settings.get("fasta_path")
     if legacy and not settings[fasta_key("hg19")] and not settings[fasta_key("hg38")]:
         build = guess_build_from_name(legacy) or (settings.get("build") if settings.get("build") in ("hg19", "hg38") else "hg19")
         settings[fasta_key(build)] = legacy
+    if not settings.get("snpeff_default_applied"):
+        settings["use_snpeff"] = True
+        settings["snpeff_default_applied"] = True
+    # A column order saved before the columns were reordered pins every column
+    # back where it used to be, so the new order would never be seen. Dropped
+    # once; any order set after that is kept.
+    if not settings.get("column_order_v2_applied"):
+        settings["column_order"] = []
+        settings["column_order_v2_applied"] = True
     return settings
 
 

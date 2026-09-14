@@ -7,6 +7,7 @@ FIELDNAMES = [
     "chrom", "pos", "ref", "alt", "gene",
     "DS_AG", "DP_AG", "DS_AL", "DP_AL", "DS_DG", "DP_DG", "DS_DL", "DP_DL",
     "max_score", "allele_fraction", "source", "snpeff_transcript", "snpeff_hgvs_c",
+    "snpeff_region",
 ]
 
 # (Original comments weren't recoverable from the compiled program; blank and
@@ -65,6 +66,7 @@ def write_rows(rows, out_path, delimiter="\t"):
                 _fmt(row.DS_DG), _fmt(row.DP_DG), _fmt(row.DS_DL), _fmt(row.DP_DL),
                 _fmt(row.max_score), _fmt(row.allele_fraction), row.source,
                 _fmt(row.snpeff_transcript), _fmt(row.snpeff_hgvs_c),
+                _fmt(row.snpeff_region),
             ])
 
 
@@ -149,6 +151,7 @@ def read_rows(path):
                     max_score=values["max_score"], source=values["source"],
                     snpeff_transcript=values.get("snpeff_transcript") or None,
                     snpeff_hgvs_c=values.get("snpeff_hgvs_c") or None,
+                    snpeff_region=values.get("snpeff_region") or None,
                     allele_fraction=values.get("allele_fraction"),
                 ))
             except (ValueError, KeyError) as exc:

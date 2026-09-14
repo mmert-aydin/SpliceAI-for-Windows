@@ -3,7 +3,7 @@
 Exact inputs of the current Setup.exe, so a rebuild can reproduce it. Update
 this file whenever a pin changes. (Not user-facing.)
 
-Built: 2026-09-11 on Windows 10 Pro 22H2 (10.0.19045), Setup version 1.0.0.
+Built: 2026-09-14 on Windows 10 Pro 22H2 (10.0.19045), Setup version 1.1.0.
 
 ## Build tools
 
@@ -101,6 +101,11 @@ passes these values into the installer.
 
 SnpEff's `examples/`, `galaxy/` and `.claude/` folders are left out of Setup (not used).
 
+The reference genomes are **not** in Setup.exe (6 GB, and public reference
+files). Setup copies them from a `reference-data` folder next to Setup.exe when
+there is one -- the USB layout -- into `%USERPROFILE%\SpliceAI_reference_data`.
+Expected there: `hg19.fa` + `hg19.fa.fai`, `hg38.fa` + `hg38.fa.fai`.
+
 VC++ runtime DLLs (installed next to the exe):
 
 ```
@@ -121,8 +126,8 @@ vcruntime140_threads.dll  18186DD0AF0E8CB6B0111ADB585AD70DD555C1C6950ECA7BA3A490
 
 | | |
 |---|---|
-| Setup.exe | `SpliceAI-VariantScoring-Setup-1.0.0.exe` |
-| Size | 1,412,585,957 bytes (1.35 GB; LZMA2 ultra64, solid) |
-| SHA-256 | `7BB45BDF941CEF4C3758FA34E72CB5B5F94AC80E8CC0A17A94373626A93003C3` |
-| Includes | the pipeline fixes, automatic build selection, run controls / MANE folder / SpliceAI check / scrolling, byte-order-mark-tolerant reading of settings, gene lists and VCFs, and drag and drop anywhere on the window, all of 2026-09-11 (see README) |
+| Setup.exe | `SpliceAI-VariantScoring-Setup-1.1.0.exe` |
+| Size | (filled in after the build) |
+| SHA-256 | (filled in after the build) |
+| Includes | everything in 1.0.0, plus (2026-09-14, see README): downloads verified through Windows' certificate store; the reference genomes found automatically and copied by Setup from a drive that carries them; the reworked window (results first, draggable panes, Advanced settings, one palette); the Region column and the drawn max score; SnpEff on by default; Java and MANE found beside the SnpEff folder |
 | Installed size | app 1.30 GB + SnpEff/Java/MANE ~1.3 GB + SpliceAI 25 MB |

@@ -10,6 +10,10 @@
                        and finish anyway; everything else must work offline
     offline-usb-wheel  network off, the SpliceAI wheel next to Setup.exe on the
                        "USB drive": Setup must use it
+    usb-reference      network on, a reference-data folder next to Setup.exe on the
+                       "USB drive": Setup must copy the genomes onto the PC, the
+                       program must find them by itself and never show the
+                       "Reference data" note, and an uninstall must keep them
     clickthrough       network on: clicks through the real Setup wizard and the
                        program like a person (SpliceAI check, a real Run, normal
                        uninstall), with a screenshot of every step (clickthrough.ps1;
@@ -30,7 +34,7 @@
     -ExtraVcf $HOME\Desktop\my-variants.vcf -ExtraExpected <known-good my-variants.tsv>
 #>
 param(
-    [ValidateSet("online", "offline", "offline-usb-wheel", "clickthrough", "manual")]
+    [ValidateSet("online", "offline", "offline-usb-wheel", "usb-reference", "clickthrough", "manual")]
     [string]$Scenario = "online",
     [string]$Setup,
     [string]$ReferenceDir = "$env:USERPROFILE\SpliceAI_reference_data",
@@ -76,6 +80,19 @@ New-Item -ItemType HardLink -Path (Join-Path $usb (Split-Path $Setup -Leaf)) -Ta
 if ($Scenario -eq "offline-usb-wheel") {
     if (-not $Wheel) { throw "-Wheel <spliceai-1.3.1-py2.py3-none-any.whl> is required for offline-usb-wheel" }
     Copy-Item $Wheel $usb
+}
+if ($Scenario -eq "usb-reference") {
+    # The drive as a colleague gets it: reference-data beside Setup.exe. Hard
+    # links where possible, so putting 6 GB "on the drive" costs nothing and
+    # the files are byte-identical to the real ones.
+    $refOnUsb = New-Item -ItemType Directory -Force (Join-Path $usb "reference-data")
+    foreach ($name in "hg19.fa", "hg19.fa.fai", "hg38.fa", "hg38.fa.fai") {
+        $src = Join-Path $ReferenceDir $name
+        if (-not (Test-Path $src)) { throw "Missing $src -- the usb-reference scenario needs both genomes." }
+        $dest = Join-Path $refOnUsb $name
+        try { New-Item -ItemType HardLink -Path $dest -Target $src -ErrorAction Stop | Out-Null }
+        catch { Copy-Item $src $dest }   # a different volume: no hard links
+    }
 }
 Copy-Item (Join-Path $PSScriptRoot "data\*") $data
 if ($ExtraVcf) { Copy-Item $ExtraVcf (Join-Path $data "extra.vcf") }

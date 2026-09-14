@@ -137,12 +137,29 @@ def private_java_exe(java_dir=None):
     return None
 
 
-def find_java():
+def sibling_java_dir(snpeff_dir):
+    """The "java" folder beside a given SnpEff install, or None.
+
+    Setup puts snpeff, java and mane next to each other, so whoever pointed
+    SnpEff at a folder almost always has the matching Java one level up from
+    it. Looking there as well as next to the app is what makes SnpEff work
+    when the app is run from somewhere else than the install -- from source,
+    or after the install folder is moved -- instead of reporting no Java while
+    a perfectly good one sits beside the jar.
+    """
+    if not snpeff_dir:
+        return None
+    candidate = os.path.join(os.path.dirname(os.path.abspath(snpeff_dir)), "java")
+    return candidate if os.path.isdir(candidate) else None
+
+
+def find_java(snpeff_dir=None):
     """Locates a java executable satisfying MIN_JAVA_VERSION, without modifying
     system PATH/environment. Checks, in order: the app's own runtime in
-    DEFAULT_JAVA_DIR (installed by "Download SnpEff..." when needed), 'java' on
-    PATH, then common Windows JDK install locations -- so this still works when
-    an older Java shadows a newer one on PATH.
+    DEFAULT_JAVA_DIR (installed by "Download SnpEff..." when needed), the java
+    folder beside snpeff_dir when one is given (see sibling_java_dir), 'java'
+    on PATH, then common Windows JDK install locations -- so this still works
+    when an older Java shadows a newer one on PATH.
 
     Raises JavaNotFoundError, with a message fit to show directly to a user,
     if nothing suitable is found.
@@ -151,6 +168,9 @@ def find_java():
     private = private_java_exe()
     if private:
         candidates.append(private)
+    beside = private_java_exe(sibling_java_dir(snpeff_dir))
+    if beside:
+        candidates.append(beside)
     on_path = shutil.which("java")
     if on_path:
         candidates.append(on_path)
@@ -254,8 +274,63 @@ def _ann_entries(info_field):
     return entries
 
 
+# Where in the gene's structure a variant falls, from SnpEff's effect term.
+# Checked in order, first match wins: an effect is often several terms joined
+# by "&" (e.g. "splice_region_variant&intron_variant"), and the structural part
+# is what this column is for -- a splice-region variant sitting in an intron is
+# reported as the intron it is in, with its number.
+_REGION_RULES = (
+    ("intron", "Intron"),
+    ("splice_acceptor", "Intron"),
+    ("splice_donor", "Intron"),
+    ("5_prime_utr", "5' UTR"),
+    ("3_prime_utr", "3' UTR"),
+    ("upstream_gene", "Upstream"),
+    ("downstream_gene", "Downstream"),
+    ("intergenic", "Intergenic"),
+    ("exon", "Exon"),
+    # Coding consequences don't say "exon" in the term, but that is where they
+    # are, and SnpEff's Rank then counts exons.
+    ("missense", "Exon"),
+    ("synonymous", "Exon"),
+    ("stop_", "Exon"),
+    ("start_", "Exon"),
+    ("frameshift", "Exon"),
+    ("inframe_", "Exon"),
+    ("initiator_codon", "Exon"),
+    ("coding_sequence", "Exon"),
+)
+
+# Regions where SnpEff's Rank ("3/27") counts something, so it is worth showing.
+_RANKED_REGIONS = ("Intron", "Exon")
+
+
+def describe_region(effect, rank=""):
+    """A short "where in the gene" label from SnpEff's Annotation and Rank
+    fields, e.g. "Intron 5/26", "Exon 3/27", "5' UTR", "Intergenic".
+
+    effect is the raw ANN Annotation field, which may join several terms with
+    "&"; rank is the raw ANN Rank field ("3/27" or empty). An effect SnpEff
+    reports that isn't in _REGION_RULES is shown as itself, tidied up, rather
+    than dropped -- an unexplained blank would be worse than an unfamiliar term.
+    """
+    effect = (effect or "").strip()
+    if not effect:
+        return None
+    lowered = effect.lower()
+    label = next((name for term, name in _REGION_RULES if term in lowered), None)
+    if label is None:
+        # e.g. "non_coding_transcript_variant" -> "Non coding transcript variant"
+        first = lowered.split("&")[0].replace("_variant", "").replace("_", " ").strip()
+        return first[:1].upper() + first[1:] if first else None
+    rank = (rank or "").strip()
+    if rank and label in _RANKED_REGIONS:
+        return f"{label} {rank}"
+    return label
+
+
 def _select_transcript_annotation(info_field, mane_select, gene=None):
-    """Extracts (transcript_id, hgvs_c) from an ANN= INFO field, picking among
+    """Extracts (transcript_id, hgvs_c, region) from an ANN= INFO field, picking among
     however many transcripts SnpEff annotated for this variant (only those of
     `gene`, if given) by priority:
 
@@ -268,47 +343,53 @@ def _select_transcript_annotation(info_field, mane_select, gene=None):
       3. Whichever entry SnpEff lists first (the original, un-prioritized
          behavior), if neither of the above found anything better.
 
-    Returns (None, None) if there's no ANN field or no parseable entry at all.
+    region (e.g. "Intron 5/26") comes from the same chosen entry as the
+    transcript, never from a different one -- an exon number that belonged to
+    some other transcript would be worse than none.
+
+    Returns (None, None, None) if there's no ANN field or no parseable entry
+    at all.
     """
     entries = _ann_entries(info_field)
     if gene is not None:
         entries = [fields for fields in entries if fields[3] == gene]
     if not entries:
-        return None, None
+        return None, None, None
 
     def transcript_id_of(fields):
         return fields[6] or None
 
-    def hgvs_c_of(fields):
-        return fields[9] or None
+    def picked(fields):
+        # fields: 1 = Annotation (effect), 6 = Feature_ID, 8 = Rank, 9 = HGVS.c
+        return transcript_id_of(fields), fields[9] or None, describe_region(fields[1], fields[8])
 
     if mane_select:
         for fields in entries:
             transcript_id = transcript_id_of(fields)
             if transcript_id and transcript_id.split(".")[0] in mane_select:
-                return transcript_id, hgvs_c_of(fields)
+                return picked(fields)
 
     for fields in entries:
         transcript_id = transcript_id_of(fields)
         if transcript_id and transcript_id.startswith(("NM_", "NR_")):
-            return transcript_id, hgvs_c_of(fields)
+            return picked(fields)
 
-    first = entries[0]
-    return transcript_id_of(first), hgvs_c_of(first)
+    return picked(entries[0])
 
 
 def _gene_annotations(info_field, mane_select):
-    """{gene_name: (transcript_id, hgvs_c)} for every gene SnpEff annotated,
+    """{gene_name: (transcript_id, hgvs_c, region)} for every gene SnpEff annotated,
     plus the key None for the overall pick across all genes -- so a variant
     overlapping two genes gets each row's own gene's transcript, never the
     other gene's (see merge._snpeff_for_gene). Empty if nothing usable."""
     result = {}
+    nothing = (None, None, None)
     overall = _select_transcript_annotation(info_field, mane_select)
-    if overall != (None, None):
+    if overall != nothing:
         result[None] = overall
     for gene in {fields[3] for fields in _ann_entries(info_field) if fields[3]}:
         picked = _select_transcript_annotation(info_field, mane_select, gene=gene)
-        if picked != (None, None):
+        if picked != nothing:
             result[gene] = picked
     return result
 
@@ -346,7 +427,7 @@ def run_snpeff_annotation(variants, build, snpeff_dir=None, java_exe=None, mane_
     check_snpeff_setup(snpeff_dir, build)
     db = SNPEFF_DB_BY_BUILD[build]
     jar_path = snpeff_jar_path(snpeff_dir)
-    java_exe = java_exe or find_java()
+    java_exe = java_exe or find_java(snpeff_dir)
 
     from .mane import load_cached_mane_select
     mane_select = load_cached_mane_select(mane_dir)

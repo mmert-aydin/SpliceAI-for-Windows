@@ -116,9 +116,13 @@ w._save_settings()
 saved = json.load(open(config.CONFIG_PATH))
 check("settings are saved per build; the old key is emptied",
       saved.get("fasta_path_hg19") == HG19 and saved.get("fasta_path_hg38") == HG38 and saved.get("fasta_path") == "")
-check("the reference note stays hidden once a FASTA is set", reference_note.should_show(config.load()) is False)
+# The paths are passed explicitly (as main.py passes the window's), so this
+# doesn't depend on what reference data the machine running it happens to have
+# -- see test_reference_locator.py for the automatic search itself.
+check("the reference note stays hidden once a FASTA is set",
+      reference_note.should_show(config.load(), {"hg19": HG19, "hg38": HG38}) is False)
 check("the reference note shows when neither FASTA is set",
-      reference_note.should_show({"fasta_path_hg19": "", "fasta_path_hg38": ""}) is True)
+      reference_note.should_show(config.load(), {"hg19": "", "hg38": ""}) is True)
 w.close()
 
 helpers.finish()

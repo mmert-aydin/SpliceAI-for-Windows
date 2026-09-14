@@ -13,12 +13,14 @@ from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame,
     QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QPlainTextEdit,
-    QProgressBar, QPushButton, QRadioButton, QScrollArea, QStyle, QTableView, QToolButton, QVBoxLayout,
-    QWidget,
+    QProgressBar, QPushButton, QRadioButton, QScrollArea, QSplitter, QStyle, QTableView, QToolButton,
+    QVBoxLayout, QWidget,
 )
 
 from spliceai_pipeline.cli import BUILDS, MODES, format_elapsed
-from spliceai_pipeline.mane import DEFAULT_MANE_DIR, find_cached_summary, is_summary_filename
+from spliceai_pipeline.mane import (
+    DEFAULT_MANE_DIR, find_cached_summary, is_summary_filename, sibling_mane_dir,
+)
 from spliceai_pipeline.snpeff import (
     DEFAULT_SNPEFF_DIR, JavaNotFoundError, SnpEffNotSetUpError, check_snpeff_setup, find_java, snpeff_jar_path,
 )
@@ -27,15 +29,19 @@ from spliceai_pipeline.writer import ResultsFileError, read_rows, write_rows_ord
 
 from . import config
 from . import spliceai_setup
+from . import theme
 from .assets_paths import LOGO_PNG
 from .cpu_meter import CpuMeter
 from .download_dialog import ReferenceDownloadDialog
 from .gene_import_dialog import GeneImportDialog
 from .mane_download_dialog import ManeDownloadDialog
+from . import reference_locator
 from .reference_download import REFERENCE_URLS
 from .snpeff_download_dialog import SnpEffDownloadDialog
 from .spliceai_setup_dialog import SpliceAISetupDialog
-from .table_model import COLUMNS, ScoreFilterProxyModel, ScoreTableModel, sort_key_value
+from .score_delegate import THRESHOLDS as SCORE_THRESHOLDS
+from .score_delegate import ScoreBarDelegate, SeverityStripeDelegate
+from .table_model import COLUMNS, MAX_SCORE_COLUMN, ScoreFilterProxyModel, ScoreTableModel, sort_key_value
 from .vcf_check import check_vcf_text
 from .vcf_info import detect_vcf_build, summarize_vcf_text
 from .worker import PipelineWorker
@@ -45,7 +51,10 @@ ABOUT_DIALOG_LOGO_SIZE = 72
 # Shown in front of the progress text while a run is paused.
 PAUSED_PREFIX = "⏸ Paused -- "
 
-THRESHOLDS = (0.2, 0.5, 0.8)
+# The filter buttons above the results and the colour bands in the table are
+# the same three SpliceAI cutoffs, taken from one place so they can't drift
+# apart (see score_delegate.THRESHOLDS for what each one means).
+THRESHOLDS = tuple(sorted(lower for lower, _colour in SCORE_THRESHOLDS))
 
 # (Original comments weren't recoverable from the compiled program; blank and
 # comment lines like these keep line numbers where they were.)
@@ -63,29 +72,6 @@ RESULTS_PAGE_SIZE = 100
 
 
 
-
-# Stylesheet for the QLineEdit fields: 1px gray (#7a7a7a) border, blue
-# (#0078d4) when focused, lighter border plus gray background/text when
-# disabled.
-LINE_EDIT_QSS = (
-    "QLineEdit {"
-    "  border: 1px solid #7a7a7a;"
-    "  border-radius: 2px;"
-    "  padding: 2px 4px;"
-    "  background: white;"
-    "}"
-    "QLineEdit:hover {"
-    "  border: 1px solid #7a7a7a;"
-    "}"
-    "QLineEdit:focus {"
-    "  border: 1px solid #0078d4;"
-    "}"
-    "QLineEdit:disabled {"
-    "  border: 1px solid #c8c8c8;"
-    "  background: #f0f0f0;"
-    "  color: #7a7a7a;"
-    "}"
-)
 
 MODE_HELP_TEXT = (
     "raw: the model's unfiltered delta scores.\n\n"
@@ -321,6 +307,12 @@ def _read_vcf_text(path):
 VCF_SUFFIXES = (".vcf", ".vcf.gz", ".vcf.bgz", ".bgz")
 FASTA_SUFFIXES = (".fa", ".fasta", ".fna")
 
+# Starting heights of the three panes (results + run controls, Input VCF,
+# Settings) the first time the window opens; after that whatever the user
+# dragged them to is remembered. Results get the room, the VCF box only as
+# much as it needs to show which file was loaded.
+DEFAULT_PANE_SIZES = [520, 150, 260]
+
 
 def dropped_local_files(mime_data):
     """Local paths in a drag (e.g. files from Explorer), in order; [] for a
@@ -429,13 +421,14 @@ class MainWindow(QMainWindow):
         if LOGO_PNG.exists():
             self.setWindowIcon(QIcon(str(LOGO_PNG)))
 
-        # LINE_EDIT_QSS is set on the QApplication, so it applies to every
-        # QLineEdit in the app (dialogs included), not just this window's.
-        # (Original comments weren't recoverable from the compiled program; blank and
-        # comment lines like these keep line numbers where they were.)
+        # The look is one stylesheet on the QApplication, so it reaches every
+        # widget including the dialogs (theme.py). main() applies it before
+        # anything is built; this is the safety net for a window constructed
+        # directly, as the checks in tests/ do -- and it must not overwrite a
+        # stylesheet that is already there.
         app = QApplication.instance()
-        if app is not None:
-            app.setStyleSheet(LINE_EDIT_QSS)
+        if app is not None and not app.styleSheet():
+            theme.apply_theme(app)
 
         self._worker = None
         self._temp_vcf_path = None
@@ -455,6 +448,7 @@ class MainWindow(QMainWindow):
         # (see dropEvent).
         self.setAcceptDrops(True)
         self._load_settings()
+        self._init_advanced_section()
         self._update_precomputed_enabled()
         self._update_run_enabled()
 
@@ -466,11 +460,39 @@ class MainWindow(QMainWindow):
         central = QWidget()
         root = QVBoxLayout(central)
 
+        # Top to bottom: what you came for (the results, with the run controls
+        # under them), then the VCF, then the settings. The order a user's eye
+        # needs them in -- the settings are read once and then left alone, so
+        # they sit at the bottom. Input has to be built before the settings:
+        # _update_run_enabled, which the settings' widgets call as they are set
+        # up, reads the VCF box.
+        #
+        # The three are panes of a splitter, so the line between any two can be
+        # dragged to give one of them more room, the way Explorer's panes work.
+        # Where they are left is remembered (config key "pane_sizes").
         root.addLayout(self._build_top_bar())
-        root.addWidget(self._build_input_group())
-        root.addWidget(self._build_options_group())
-        root.addLayout(self._build_run_row())
-        root.addWidget(self._build_results_group(), stretch=1)
+
+        results_pane = QWidget()
+        results_layout = QVBoxLayout(results_pane)
+        results_layout.setContentsMargins(0, 0, 0, 0)
+        results_layout.addWidget(self._build_results_group(), stretch=1)
+        # The run controls belong with the results and are never resized on
+        # their own, so they ride along at the bottom of this pane.
+        results_layout.addLayout(self._build_run_row())
+
+        self.panes = QSplitter(Qt.Vertical)
+        self.panes.setChildrenCollapsible(False)
+        self.panes.setHandleWidth(7)
+        self.panes.addWidget(results_pane)
+        self.panes.addWidget(self._build_input_group())
+        self.panes.addWidget(self._build_options_group())
+        # Extra height goes to the results; the other two keep what they have.
+        self.panes.setStretchFactor(0, 1)
+        self.panes.setStretchFactor(1, 0)
+        self.panes.setStretchFactor(2, 0)
+        self.panes.setSizes(DEFAULT_PANE_SIZES)
+        root.addWidget(self.panes, stretch=1)
+
         # The results table keeps a usable height; when space runs out the
         # page scrolls rather than shrinking it to a few rows.
         self.table_view.setMinimumHeight(260)
@@ -523,7 +545,7 @@ class MainWindow(QMainWindow):
     def _build_top_bar(self):
         row = QHBoxLayout()
         title = QLabel("SpliceAI Variant Scoring")
-        title.setStyleSheet("font-size: 18pt; font-weight: bold; color: #1a5fb4;")
+        title.setStyleSheet(f"font-size: 16pt; font-weight: 600; color: {theme.INK};")
         row.addWidget(title)
         row.addStretch(1)
 
@@ -532,7 +554,7 @@ class MainWindow(QMainWindow):
         # (Original comments weren't recoverable from the compiled program; blank and
         # comment lines like these keep line numbers where they were.)
         self.spliceai_status_button = QPushButton()
-        self.spliceai_status_button.setStyleSheet("QPushButton { color: #b00020; font-weight: bold; }")
+        self.spliceai_status_button.setStyleSheet(theme.pill("crit"))
         self.spliceai_status_button.setCursor(Qt.PointingHandCursor)
         self.spliceai_status_button.clicked.connect(self._on_spliceai_status_clicked)
         row.addWidget(self.spliceai_status_button)
@@ -547,14 +569,14 @@ class MainWindow(QMainWindow):
         """Always shown: green when SpliceAI is found (click to check it), red
         when it isn't (click to install it)."""
         if spliceai_setup.is_spliceai_installed():
-            text, color = "✓ SpliceAI found · Check", "#1a7f37"
+            text, kind = "SpliceAI ready", "ok"
             tip = "SpliceAI is installed. Click to see its version and location, and whether all its files are there."
         else:
-            text, color = "⚠ SpliceAI not installed -- live scoring unavailable", "#b00020"
-            tip = "Click to install SpliceAI."
+            text, kind = "SpliceAI not installed", "crit"
+            tip = "Live scoring can't run without it. Click to install SpliceAI."
         self.spliceai_status_button.setText(text)
         self.spliceai_status_button.setToolTip(tip)
-        self.spliceai_status_button.setStyleSheet(f"QPushButton {{ color: {color}; font-weight: bold; }}")
+        self.spliceai_status_button.setStyleSheet(theme.pill(kind))
         self.spliceai_status_button.setVisible(True)
 
     def _on_spliceai_status_clicked(self):
@@ -606,6 +628,10 @@ class MainWindow(QMainWindow):
         self.vcf_text.setPlaceholderText(
             'Paste VCF content here, use "Load file..." below, or drag a .vcf / .vcf.gz file anywhere onto this window.'
         )
+        # A few lines is enough: a loaded VCF is read from its file, not from
+        # what is on show here, so this box only has to prove the right file
+        # arrived. Drag the line below the group to make it taller.
+        self.vcf_text.setMinimumHeight(58)
         self.vcf_text.textChanged.connect(self._update_run_enabled)
         self.vcf_text.textChanged.connect(self._on_vcf_text_changed)
         self.vcf_text.fileDropped.connect(self._on_file_dropped)
@@ -648,11 +674,19 @@ class MainWindow(QMainWindow):
         return group
 
     def _build_options_group(self):
-        group = QGroupBox("Options")
+        """Settings. Only the two things that really are a per-run decision are
+        on show -- raw/masked scoring and whether there is precomputed data.
+
+        Everything else (the genome build, the reference FASTAs, SnpEff, MANE)
+        either comes with Setup or is worked out from the VCF, so it lives
+        behind "Advanced settings" and is only there for when that goes wrong.
+        The build and its evidence are still reported in the open, read-only:
+        scoring against the wrong build gives wrong answers quietly, so that
+        one must never be out of sight.
+        """
+        group = QGroupBox("Settings")
         layout = QVBoxLayout(group)
 
-        top_row = QHBoxLayout()
-        top_row.addWidget(QLabel("Build:"))
         self.build_combo = QComboBox()
         self.build_combo.addItems(list(BUILDS))
         self.build_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
@@ -661,11 +695,9 @@ class MainWindow(QMainWindow):
         # comment lines like these keep line numbers where they were.)
         self.build_combo.currentTextChanged.connect(self._update_run_enabled)
         self.build_combo.currentTextChanged.connect(self._on_build_changed)
-        top_row.addWidget(self.build_combo)
         # Where the selected build came from -- the VCF's own header, when it
         # says (see _detect_vcf_build).
         self.build_source_label = QLabel("")
-        top_row.addWidget(self.build_source_label)
         self._detected_build = (None, None)
         self._vcf_present = False
         self._build_detect_timer = QTimer(self)
@@ -673,6 +705,7 @@ class MainWindow(QMainWindow):
         self._build_detect_timer.setInterval(300)
         self._build_detect_timer.timeout.connect(self._detect_vcf_build)
 
+        top_row = QHBoxLayout()
         top_row.addWidget(QLabel("Mode:"))
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(list(MODES))
@@ -682,6 +715,12 @@ class MainWindow(QMainWindow):
 
         self.mode_help_button = self._make_help_button("Raw vs Masked scoring", MODE_HELP_TEXT)
         top_row.addWidget(self.mode_help_button)
+
+        top_row.addSpacing(24)
+        # Read-only twin of the build row inside Advanced settings: which build
+        # this run will use, and whether the VCF agrees.
+        self.build_summary_label = QLabel("")
+        top_row.addWidget(self.build_summary_label)
 
         top_row.addStretch(1)
         layout.addLayout(top_row)
@@ -716,10 +755,41 @@ class MainWindow(QMainWindow):
         self.skip_precomputed_checkbox = QCheckBox("Skip variants already in precomputed data")
         layout.addWidget(self.skip_precomputed_checkbox)
 
+        # --- advanced settings --------------------------------------------
+        # The reference genomes, SnpEff and MANE all come with Setup and are
+        # found automatically, so none of this is a question anyone should have
+        # to answer. It is folded away, with one line saying whether everything
+        # is in place; it opens by itself when something isn't.
+        advanced_row = QHBoxLayout()
+        self.advanced_button = QPushButton()
+        self.advanced_button.setCheckable(True)
+        self.advanced_button.toggled.connect(self._on_advanced_toggled)
+        advanced_row.addWidget(self.advanced_button)
+        self.setup_status_label = QLabel()
+        self.setup_status_label.setWordWrap(True)
+        advanced_row.addWidget(self.setup_status_label, stretch=1)
+        layout.addLayout(advanced_row)
+
+        self.advanced_widget = QWidget()
+        advanced_layout = QVBoxLayout(self.advanced_widget)
+        advanced_layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.advanced_widget)
+
+        build_row = QHBoxLayout()
+        build_row.addWidget(QLabel("Genome build:"))
+        build_row.addWidget(self.build_combo)
+        build_row.addWidget(self.build_source_label)
+        build_row.addStretch(1)
+        advanced_layout.addLayout(build_row)
+
         # One reference FASTA per build; a run uses the selected build's
         # (_selected_fasta), and that row is marked (_update_fasta_rows).
         self.fasta_edits = {}
         self.fasta_row_labels = {}
+        self.fasta_rows_widget = QWidget()
+        fasta_rows_layout = QVBoxLayout(self.fasta_rows_widget)
+        fasta_rows_layout.setContentsMargins(0, 0, 0, 0)
+        advanced_layout.addWidget(self.fasta_rows_widget)
         label_width = self.fontMetrics().horizontalAdvance("hg38 reference FASTA (used for this run):") + 12
         for build in BUILDS:
             fasta_row = QHBoxLayout()
@@ -746,20 +816,25 @@ class MainWindow(QMainWindow):
                 self.fasta_help_button = help_button
             self.fasta_edits[build] = edit
             self.fasta_row_labels[build] = label
-            layout.addLayout(fasta_row)
+            edit.textChanged.connect(self._update_setup_status)
+            fasta_rows_layout.addLayout(fasta_row)
         self._update_fasta_rows()
 
         snpeff_opt_row = QHBoxLayout()
-        self.use_snpeff_checkbox = QCheckBox("I will use SnpEff")
+        self.use_snpeff_checkbox = QCheckBox("Annotate with SnpEff")
+        self.use_snpeff_checkbox.setToolTip(
+            "On by default: SnpEff comes with the program. Turning it off drops the "
+            "coding position and transcript (NM) columns, and makes a run a little faster."
+        )
         self.use_snpeff_checkbox.toggled.connect(self._on_use_snpeff_toggled)
         snpeff_opt_row.addWidget(self.use_snpeff_checkbox)
-        snpeff_opt_row.addWidget(QLabel("Required for coding position and transcript (NM) annotation."))
+        snpeff_opt_row.addWidget(QLabel("Gives the coding position and transcript (NM) columns."))
         self.snpeff_about_help_button = self._make_help_button("About SnpEff", SNPEFF_ABOUT_HELP_TEXT)
         snpeff_opt_row.addWidget(self.snpeff_about_help_button)
         self.snpeff_help_button = self._make_help_button("SnpEff setup", SNPEFF_HELP_TEXT)
         snpeff_opt_row.addWidget(self.snpeff_help_button)
         snpeff_opt_row.addStretch(1)
-        layout.addLayout(snpeff_opt_row)
+        advanced_layout.addLayout(snpeff_opt_row)
 
         # (Original comments weren't recoverable from the compiled program; blank and
         # comment lines like these keep line numbers where they were.)
@@ -812,13 +887,29 @@ class MainWindow(QMainWindow):
         snpeff_config_layout.addLayout(mane_row)
 
         self.snpeff_config_widget.setVisible(False)
-        layout.addWidget(self.snpeff_config_widget)
+        advanced_layout.addWidget(self.snpeff_config_widget)
 
+        # Turning SnpEff off hides its folder and the MANE row with it, because
+        # MANE only refines the transcript SnpEff picked -- on its own it has
+        # nothing to act on. Rather than leaving a gap where those rows were,
+        # say what was lost and how to get it back.
+        self.snpeff_off_label = QLabel(
+            "SnpEff is off, so results have no transcript (NM) or coding position, and "
+            "MANE Select isn't used. Tick \"Annotate with SnpEff\" above for both -- "
+            "it comes with the program and needs nothing downloaded."
+        )
+        self.snpeff_off_label.setWordWrap(True)
+        self.snpeff_off_label.setStyleSheet(theme.STATUS_WARN)
+        advanced_layout.addWidget(self.snpeff_off_label)
+
+        self.advanced_widget.setVisible(False)
         return group
 
     def _build_run_row(self):
         row = QHBoxLayout()
         self.run_button = QPushButton("Run")
+        # The one button that starts the work; styled as the accent (theme.py).
+        self.run_button.setObjectName("runButton")
         self.run_button.clicked.connect(self._on_run_clicked)
         row.addWidget(self.run_button)
 
@@ -939,7 +1030,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.row_count_label)
 
         self.no_results_label = QLabel("")
-        self.no_results_label.setStyleSheet("color: #b00020; font-style: italic;")
+        self.no_results_label.setStyleSheet(f"color: {theme.CRIT}; font-style: italic;")
         self.no_results_label.setVisible(False)
         layout.addWidget(self.no_results_label)
 
@@ -967,6 +1058,14 @@ class MainWindow(QMainWindow):
         self.table_view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table_view.customContextMenuRequested.connect(self._on_results_context_menu)
         self.table_view.horizontalHeader().setSectionsMovable(True)
+
+        # Max Score is drawn as a number with a bar behind it, and the first
+        # column carries a severity stripe, so a long result set can be
+        # scanned. Presentation only -- see score_delegate.py.
+        self._score_delegate = ScoreBarDelegate(self.table_view)
+        self.table_view.setItemDelegateForColumn(MAX_SCORE_COLUMN, self._score_delegate)
+        self._stripe_delegate = SeverityStripeDelegate(MAX_SCORE_COLUMN, self.table_view)
+        self.table_view.setItemDelegateForColumn(0, self._stripe_delegate)
 
         # sort(-1) is Qt's "no sort column": the proxy keeps the source
         # model's row order.
@@ -1012,12 +1111,22 @@ class MainWindow(QMainWindow):
     # comment lines like these keep line numbers where they were.)
     def _load_settings(self):
         settings = config.load()
+        # Fills in any reference FASTA that isn't set (or whose saved file has
+        # gone) from the usual places -- see reference_locator. self.
+        # detected_references names the builds that came from there, for the
+        # summary line and so _save_settings can write them back.
+        paths, self.detected_references = reference_locator.resolve(settings)
         for build, edit in self.fasta_edits.items():
-            edit.setText(settings[config.fasta_key(build)])
+            edit.setText(paths[build])
         self.precomputed_dir_edit.setText(settings["precomputed_dir"])
         self.snpeff_dir_edit.setText(settings["snpeff_dir"])
         self.mane_dir_edit.setText(settings["mane_dir"])
+        # On unless SnpEff genuinely isn't there: it ships with Setup, but a
+        # run from source (or a half-finished install) has no database, and an
+        # unticked box the user can see beats a disabled Run button.
         self.use_snpeff_checkbox.setChecked(settings["use_snpeff"])
+        if settings["use_snpeff"] and not self._snpeff_ready():
+            self.use_snpeff_checkbox.setChecked(False)
         self.skip_precomputed_checkbox.setChecked(settings["skip_precomputed"])
         if settings["build"] in BUILDS:
             self.build_combo.setCurrentText(settings["build"])
@@ -1030,6 +1139,13 @@ class MainWindow(QMainWindow):
 
         if settings["column_order"]:
             self._apply_column_order(settings["column_order"])
+
+        # Only a list of the right shape, so an edited or older settings file
+        # can't leave a pane at zero height with no way to get it back.
+        sizes = settings["pane_sizes"]
+        if (isinstance(sizes, list) and len(sizes) == self.panes.count()
+                and all(isinstance(n, int) and n > 0 for n in sizes)):
+            self.panes.setSizes(sizes)
 
     def _save_settings(self):
         if self.use_precomputed_radio.isChecked():
@@ -1052,9 +1168,12 @@ class MainWindow(QMainWindow):
             "mode": self.mode_combo.currentText(),
             "skip_precomputed": self.skip_precomputed_checkbox.isChecked(),
             "column_order": self._current_column_order(),
+            "column_order_v2_applied": True,
+            "pane_sizes": self.panes.sizes(),
             "snpeff_dir": self.snpeff_dir_edit.text().strip(),
             "mane_dir": self.mane_dir_edit.text().strip(),
             "use_snpeff": self.use_snpeff_checkbox.isChecked(),
+            "snpeff_default_applied": True,
         })
         config.save(settings)
 
@@ -1232,13 +1351,21 @@ class MainWindow(QMainWindow):
         if not self._vcf_present:
             text, style = "", ""
         elif build is None:
-            text, style = "⚠ build not stated in the VCF -- make sure this is right", "color: #b26a00;"
+            text, style = "⚠ build not stated in the VCF -- make sure this is right", theme.STATUS_WARN
         elif build == self.build_combo.currentText():
-            text, style = f"✓ from the VCF ({evidence})", "color: #1a7f37;"
+            text, style = f"✓ from the VCF ({evidence})", theme.STATUS_OK
         else:
-            text, style = f"⚠ the VCF says {build} ({evidence})", "color: #b00020; font-weight: bold;"
+            text, style = f"⚠ the VCF says {build} ({evidence})", theme.STATUS_CRIT
         self.build_source_label.setText(text)
         self.build_source_label.setStyleSheet(style)
+        # The same thing again in the open, where the build combo no longer is.
+        summary = getattr(self, "build_summary_label", None)
+        if summary is not None:
+            selected = self.build_combo.currentText()
+            summary.setText(f"Genome build: {selected} {text}".rstrip() if text else f"Genome build: {selected}")
+            summary.setStyleSheet(style or theme.STATUS_MUTED)
+            summary.setToolTip("Chosen from the VCF's own header. To set it by hand, "
+                               "open Advanced settings.")
 
     def _on_build_changed(self, _build=None):
         self._update_fasta_rows()
@@ -1254,7 +1381,76 @@ class MainWindow(QMainWindow):
         for build, label in labels.items():
             active = build == selected
             label.setText(f"{build} reference FASTA" + (" (used for this run):" if active else ":"))
-            label.setStyleSheet("font-weight: bold;" if active else "color: gray;")
+            label.setStyleSheet("font-weight: 600;" if active else theme.STATUS_MUTED)
+        self._update_setup_status()
+
+    def _on_advanced_toggled(self, checked):
+        self.advanced_widget.setVisible(checked)
+        self.advanced_button.setText("Hide advanced settings" if checked else "Advanced settings...")
+
+    def setup_problems(self):
+        """What, if anything, stops this being a normal run -- in the order a
+        user would have to deal with it. Everything here comes with Setup, so
+        an empty list is the expected case and the only one most people see."""
+        problems = []
+        if not self._selected_fasta():
+            build = self.build_combo.currentText()
+            problems.append(f"the {build} reference genome hasn't been found")
+        # getattr: the FASTA rows are built (and ask for this) before the
+        # SnpEff row below them exists.
+        if getattr(self, "use_snpeff_checkbox", None) and self.use_snpeff_checkbox.isChecked():
+            ready, short_message, _detail = self._snpeff_status()
+            if not ready:
+                problems.append(short_message[0].lower() + short_message[1:])
+        return problems
+
+    def _update_setup_status(self, _text=None):
+        """The one line next to "Advanced settings...": either everything is in
+        place (and where the genomes came from), or what isn't."""
+        label = getattr(self, "setup_status_label", None)
+        if label is None or not getattr(self, "fasta_edits", None):
+            return
+        problems = self.setup_problems()
+        if problems:
+            text = "⚠ " + "; ".join(problems) + " -- open Advanced settings."
+            style = theme.STATUS_CRIT
+        else:
+            # Only the paths still holding what was detected -- once the user
+            # browses to a file of their own, the window stops claiming it
+            # found it.
+            detected = getattr(self, "detected_references", {})
+            set_builds = [b for b in BUILDS if self.fasta_edits[b].text().strip()]
+            folders = {os.path.dirname(detected[b]) for b in set_builds
+                       if detected.get(b) == self.fasta_edits[b].text().strip()}
+            where = f", found in {sorted(folders)[0]}" if len(folders) == 1 else ""
+            parts = ["reference genome " + " and ".join(set_builds)]
+            if self.use_snpeff_checkbox.isChecked():
+                parts.append("SnpEff")
+            text = f"Ready: {', '.join(parts)}{where}."
+            style = theme.STATUS_MUTED
+        label.setText(text)
+        label.setStyleSheet(style)
+
+    def _init_advanced_section(self):
+        """Called once, after the settings are loaded: advanced settings stay
+        folded away when everything is in place, and start open when something
+        has to be sorted out."""
+        self.advanced_button.setChecked(bool(self.setup_problems()))
+        # setChecked() emits nothing when the value doesn't change, so set the
+        # button's text and the section's visibility here either way.
+        self._on_advanced_toggled(self.advanced_button.isChecked())
+
+    def _reveal_reference_section(self):
+        """Opens advanced settings, so a file that has just been put into one
+        of its rows (dropped, browsed to, downloaded) is somewhere visible."""
+        self.advanced_button.setChecked(True)
+        self._on_advanced_toggled(True)
+
+    def reference_paths(self):
+        """{build: FASTA path} as the window currently has them, including the
+        ones found automatically. Used by the first-launch reference note, so
+        it isn't shown about files the window already has."""
+        return {build: edit.text().strip() for build, edit in self.fasta_edits.items()}
 
     def _selected_fasta(self):
         return self.fasta_edits[self.build_combo.currentText()].text().strip()
@@ -1353,6 +1549,7 @@ class MainWindow(QMainWindow):
             if reply != QMessageBox.Yes:
                 return
         self.fasta_edits[build].setText(path)
+        self._reveal_reference_section()
 
     def _on_download_reference(self, build):
         dialog = ReferenceDownloadDialog(self, default_build=build)
@@ -1360,6 +1557,7 @@ class MainWindow(QMainWindow):
             path = dialog.result_path()
             if path:
                 self.fasta_edits[dialog.result_build()].setText(path)
+                self._reveal_reference_section()
 
     def _update_precomputed_enabled(self):
         use_precomputed = self.use_precomputed_radio.isChecked()
@@ -1403,6 +1601,7 @@ class MainWindow(QMainWindow):
 
         enabled = has_vcf and has_fasta and precomputed_chosen and precomputed_dir_ok and snpeff_ready
         self.run_button.setEnabled(enabled and self._worker is None)
+        self._update_setup_status()
 
     def _snpeff_ready(self):
         return self._snpeff_status()[0]
@@ -1429,7 +1628,7 @@ class MainWindow(QMainWindow):
         build = self.build_combo.currentText()
         try:
             check_snpeff_setup(snpeff_dir, build)
-            find_java()
+            find_java(snpeff_dir)
             return True, "", ""
         except JavaNotFoundError as exc:
             # SnpEff is there but no usable Java: "Download SnpEff..." now fetches
@@ -1451,7 +1650,7 @@ class MainWindow(QMainWindow):
             return
         if ready:
             self.snpeff_status_label.setText("✓ Installed")
-            self.snpeff_status_label.setStyleSheet("color: #1a7f37; font-weight: bold;")
+            self.snpeff_status_label.setStyleSheet(theme.STATUS_OK)
             self.snpeff_status_label.setToolTip("")
 
         # (Original comments weren't recoverable from the compiled program; blank and
@@ -1462,11 +1661,22 @@ class MainWindow(QMainWindow):
         # the missing path/command) as the tooltip.
         else:
             self.snpeff_status_label.setText(f'{short_message} -- click "Download SnpEff..."')
-            self.snpeff_status_label.setStyleSheet("color: #5f5f5f; font-weight: bold;")
+            self.snpeff_status_label.setStyleSheet(theme.STATUS_MUTED)
             self.snpeff_status_label.setToolTip(detail)
 
     def _mane_dir(self):
-        return self.mane_dir_edit.text().strip() or DEFAULT_MANE_DIR
+        """Where to look for the MANE summary: the field if it is set,
+        otherwise the "mane" folder next to the app, and failing that the one
+        beside the chosen SnpEff install -- Setup puts snpeff, java and mane
+        side by side, so that sibling is where it is when the app itself is
+        running from somewhere else."""
+        chosen = self.mane_dir_edit.text().strip()
+        if chosen:
+            return chosen
+        if find_cached_summary(DEFAULT_MANE_DIR):
+            return DEFAULT_MANE_DIR
+        beside = sibling_mane_dir(self.snpeff_dir_edit.text().strip() or DEFAULT_SNPEFF_DIR)
+        return beside or DEFAULT_MANE_DIR
 
     def _update_mane_status_label(self):
         """Whether the MANE folder (field, or the default) has a summary file
@@ -1477,11 +1687,11 @@ class MainWindow(QMainWindow):
             # Short, so it fits a small window; the full path is the tooltip.
             version = os.path.basename(path).split(".summary")[0].rsplit(".v", 1)[-1]
             self.mane_status_label.setText(f"✓ Found (MANE v{version})")
-            self.mane_status_label.setStyleSheet("color: #1a7f37; font-weight: bold;")
+            self.mane_status_label.setStyleSheet(theme.STATUS_OK)
             self.mane_status_label.setToolTip(path)
         else:
             self.mane_status_label.setText("Not found")
-            self.mane_status_label.setStyleSheet("color: #5f5f5f; font-weight: bold;")
+            self.mane_status_label.setStyleSheet(theme.STATUS_MUTED)
             self.mane_status_label.setToolTip(f"No MANE.GRCh38.vX.X.summary.txt.gz in {mane_dir}")
 
     def _on_browse_mane_file(self):
@@ -1502,6 +1712,7 @@ class MainWindow(QMainWindow):
 
     def _on_use_snpeff_toggled(self, checked):
         self.snpeff_config_widget.setVisible(checked)
+        self.snpeff_off_label.setVisible(not checked)
         if checked:
             self._update_mane_status_label()
         self._update_run_enabled()

@@ -24,8 +24,8 @@ import csv
 import gzip
 import os
 import re
-import urllib.request
 
+from . import net
 from .app_paths import app_root_dir
 
 MANE_CURRENT_DIR_URL = "https://ftp.ncbi.nlm.nih.gov/refseq/MANE/MANE_human/current/"
@@ -49,12 +49,12 @@ def find_current_summary_filename(opener=None):
     "MANE.GRCh38.v1.5.summary.txt.gz") by reading NCBI's own directory listing,
     rather than hardcoding a version number that will silently go stale the
     next time MANE releases a new version."""
-    opener = opener or urllib.request.urlopen
+    opener = opener or net.urlopen
     try:
         with opener(MANE_CURRENT_DIR_URL) as response:
             listing = response.read().decode("utf-8", errors="replace")
     except Exception as exc:
-        raise ManeDownloadError(f"Could not list {MANE_CURRENT_DIR_URL}: {exc}") from exc
+        raise ManeDownloadError(net.download_error_message(exc, f"Could not list {MANE_CURRENT_DIR_URL}.")) from exc
     match = _SUMMARY_FILENAME_RE.search(listing)
     if not match:
         raise ManeDownloadError(
@@ -71,7 +71,7 @@ def fetch_mane_summary(dest_dir=None, opener=None):
     progress reporting needed. Returns the local file path.
     """
     dest_dir = dest_dir or DEFAULT_MANE_DIR
-    opener = opener or urllib.request.urlopen
+    opener = opener or net.urlopen
     filename = find_current_summary_filename(opener=opener)
     os.makedirs(dest_dir, exist_ok=True)
     dest_path = os.path.join(dest_dir, filename)
@@ -87,7 +87,7 @@ def fetch_mane_summary(dest_dir=None, opener=None):
                 os.remove(tmp_path)
             except OSError:
                 pass
-        raise ManeDownloadError(f"Failed to download {url}: {exc}") from exc
+        raise ManeDownloadError(net.download_error_message(exc, f"Failed to download {url}.")) from exc
     return dest_path
 
 
@@ -95,6 +95,21 @@ def is_summary_filename(path):
     """True for a MANE summary file name, e.g. MANE.GRCh38.v1.5.summary.txt.gz
     -- the only kind find_cached_summary() picks up."""
     return bool(_SUMMARY_FILENAME_RE.fullmatch(os.path.basename(path)))
+
+
+def sibling_mane_dir(snpeff_dir):
+    """The "mane" folder beside a given SnpEff install, or None.
+
+    Setup puts snpeff, java and mane next to each other. When the app is
+    running from somewhere else than the install -- from source, or after the
+    folder is moved -- this is where the summary actually is, so it is worth
+    looking here before reporting that MANE isn't set up. Same reasoning as
+    snpeff.sibling_java_dir.
+    """
+    if not snpeff_dir:
+        return None
+    candidate = os.path.join(os.path.dirname(os.path.abspath(snpeff_dir)), "mane")
+    return candidate if os.path.isdir(candidate) else None
 
 
 def find_cached_summary(mane_dir=None):

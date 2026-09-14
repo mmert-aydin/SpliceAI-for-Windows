@@ -22,6 +22,9 @@ class ScoreRow:
     source: str
     snpeff_transcript: Optional[str] = None
     snpeff_hgvs_c: Optional[str] = None
+    # Where in the gene this variant falls, from the same SnpEff entry the
+    # transcript came from: "Intron 5/26", "Exon 3/27", "5' UTR", "Intergenic".
+    snpeff_region: Optional[str] = None
     allele_fraction: Optional[float] = None
 
     @property
@@ -75,11 +78,11 @@ def _same_scores(row_a, row_b):
 
 
 def _snpeff_for_gene(snpeff_ann, gene, n_genes):
-    """The SnpEff (transcript_id, hgvs_c) for one output row, or None.
+    """The SnpEff (transcript_id, hgvs_c, region) for one output row, or None.
 
     snpeff_ann is snpeff.run_snpeff_annotation()'s per-variant value --
-    {gene_name: (transcript_id, hgvs_c), ..., None: overall pick} -- or a plain
-    (transcript_id, hgvs_c) tuple, which applies to every row. A row gets its
+    {gene_name: (transcript_id, hgvs_c, region), ..., None: overall pick} -- or
+    a plain tuple, which applies to every row. A row gets its
     own gene's annotation. If SnpEff has none under that gene name, a variant
     with a single gene still gets the overall pick (SpliceAI's and SnpEff's gene
     sets don't always use the same symbol); with several genes that row is
@@ -142,7 +145,10 @@ def merge_variant(chrom, pos, ref, alt, precomputed_annotations, live_annotation
         for row in rows:
             picked = _snpeff_for_gene(snpeff_ann, row.gene, n_genes)
             if picked is not None:
-                row.snpeff_transcript, row.snpeff_hgvs_c = picked
+                # A 2-tuple is accepted so a caller (or an older saved result)
+                # that has no region still merges.
+                row.snpeff_transcript, row.snpeff_hgvs_c = picked[0], picked[1]
+                row.snpeff_region = picked[2] if len(picked) > 2 else None
     if allele_fraction is not None:
         for row in rows:
             row.allele_fraction = allele_fraction

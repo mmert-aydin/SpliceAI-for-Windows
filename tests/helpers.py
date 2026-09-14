@@ -32,6 +32,15 @@ VCF_COLUMNS = "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n"
 
 sys.path.insert(0, str(REPO))
 
+# Check names quote what the window says, which contains ✓ and ⚠. A console on
+# a non-UTF-8 codepage (cp1254 on a Turkish Windows, cp437 in some pipes) would
+# otherwise kill the run with UnicodeEncodeError instead of printing a result.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except (AttributeError, OSError):
+    pass
+
 _failures = []
 
 

@@ -97,7 +97,31 @@ scroll = w.centralWidget()
 check("the whole window scrolls", isinstance(scroll, QScrollArea))
 check("a small window gets a vertical scrollbar", scroll.verticalScrollBar().maximum() > 0)
 
-check("the SpliceAI button shows it's found", w.spliceai_status_button.text().startswith("✓ SpliceAI found"))
+check("the SpliceAI pill shows it's found", w.spliceai_status_button.text() == "SpliceAI ready",
+      w.spliceai_status_button.text())
+check("...and says what clicking it does", "Click to see its version" in w.spliceai_status_button.toolTip())
+
+# Setup puts snpeff, java and mane side by side. Java and MANE are found beside
+# the chosen SnpEff folder, not only beside the app -- without that, running
+# from anywhere but the install reports "no Java" with a good one right there,
+# and SnpEff silently switches itself off.
+from spliceai_pipeline.mane import sibling_mane_dir  # noqa: E402
+from spliceai_pipeline.snpeff import find_java, sibling_java_dir  # noqa: E402
+
+if helpers.SNPEFF_DIR is None:
+    helpers.skip("Java and MANE beside SnpEff", "no installer\thirdparty")
+else:
+    snpeff_dir = str(helpers.SNPEFF_DIR)
+    check("the java folder beside SnpEff is found", sibling_java_dir(snpeff_dir) is not None,
+          str(sibling_java_dir(snpeff_dir)))
+    try:
+        check("...and a Java 21+ in it", bool(find_java(snpeff_dir)), find_java(snpeff_dir))
+    except Exception as exc:
+        check("...and a Java 21+ in it", False, str(exc))
+    check("the mane folder beside SnpEff is found", sibling_mane_dir(snpeff_dir) is not None,
+          str(sibling_mane_dir(snpeff_dir)))
+    check("nothing is claimed for a folder with no siblings",
+          sibling_java_dir(None) is None and sibling_mane_dir("") is None)
 info = spliceai_setup.check_installation()
 check("the SpliceAI check: version 1.3.1, all model and annotation files",
       info and info["version"] == "1.3.1" and not info["missing_models"] and not info["missing_annotations"])

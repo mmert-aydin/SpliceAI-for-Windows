@@ -13,7 +13,7 @@ import os
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QCheckBox, QMessageBox
 
-from . import config
+from . import config, reference_locator
 
 REFERENCE_NOTE_HTML = (
     "<p><b>SpliceAI Variant Scoring is installed and ready.</b></p>"
@@ -32,11 +32,16 @@ REFERENCE_NOTE_HTML = (
 )
 
 
-def should_show(settings):
+def should_show(settings, paths=None):
+    """True when the note is worth showing. `paths` is the reference FASTA of
+    each build as the window actually has it -- which includes the ones found
+    automatically (reference_locator), not only the ones saved in settings, so
+    a machine where Setup copied the files never sees this note at all."""
     if settings.get("hide_reference_note"):
         return False
-    paths = [settings.get(config.fasta_key(build)) or "" for build in ("hg19", "hg38")]
-    return not any(path and os.path.isfile(path) for path in paths)
+    if paths is None:
+        paths, _detected = reference_locator.resolve(settings)
+    return not any(path and os.path.isfile(path) for path in paths.values())
 
 
 def _remember_hidden():
@@ -45,10 +50,10 @@ def _remember_hidden():
     config.save(settings)
 
 
-def show_reference_note_if_needed(parent):
+def show_reference_note_if_needed(parent, paths=None):
     """Shows the note modelessly over `parent` if needed; returns the box (or
     None) -- parented to `parent`, so it lives as long as the main window."""
-    if not should_show(config.load()):
+    if not should_show(config.load(), paths):
         return None
     box = QMessageBox(parent)
     box.setWindowTitle("Reference data")

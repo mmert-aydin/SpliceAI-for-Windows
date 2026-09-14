@@ -91,6 +91,12 @@ user (no admin rights) into `%LOCALAPPDATA%\Programs\SpliceAI-VariantScoring`,
 with SnpEff (GRCh37 + GRCh38 databases), Java, MANE and the VC++ runtime
 included, plus Start Menu and Desktop shortcuts and an uninstaller.
 
+The reference genomes aren't in Setup.exe either -- 6 GB, and they're public
+reference files. When Setup is started from a drive that has a `reference-data`
+folder next to Setup.exe, it offers to copy them to
+`%USERPROFILE%\SpliceAI_reference_data`; the program looks there first, so
+after that it never asks for them (`spliceai_gui/reference_locator.py`).
+
 SpliceAI itself is never in Setup.exe. During Setup it's downloaded from PyPI
 (the exact file pinned in `spliceai_gui/spliceai_setup.py`, SHA-256-checked)
 and unpacked into the app. If a PC is offline, Setup says so and finishes;
@@ -100,10 +106,10 @@ Setup.exe is used instead of downloading.
 ```
 winget install --id JRSoftware.InnoSetup -e --scope user   # once
 powershell -ExecutionPolicy Bypass -File installer\fetch-thirdparty.ps1   # fresh checkout only
-powershell -ExecutionPolicy Bypass -File installer\build.ps1 -Version 1.0.0
+powershell -ExecutionPolicy Bypass -File installer\build.ps1 -Version 1.1.0
 ```
 
-Result: `installer\output\SpliceAI-VariantScoring-Setup-1.0.0.exe`.
+Result: `installer\output\SpliceAI-VariantScoring-Setup-1.1.0.exe`.
 
 - `installer\SpliceAI-VariantScoring.iss` is the Inno Setup script; `build.ps1`
   builds the app with PyInstaller into `installer\build` and passes it the
@@ -111,6 +117,9 @@ Result: `installer\output\SpliceAI-VariantScoring-Setup-1.0.0.exe`.
 - `installer\BUNDLED-VERSIONS.md` lists the exact versions in the current build.
 - `installer\test\run-sandbox.ps1` tests Setup.exe in Windows Sandbox (a clean
   Windows, optionally without network): install, scoring, relaunch, uninstall.
+  Scenarios: `online`, `offline`, `offline-usb-wheel`, `usb-reference` (the
+  genomes are copied off the drive and found by the program), `clickthrough`
+  (drives the real wizard and window, with screenshots), `manual`.
 - The installed exe also runs headless:
   `SpliceAI-VariantScoring.exe --cli input.vcf --build hg19 --mode masked --fasta hg19.fa -o out.tsv`.
 
@@ -258,6 +267,93 @@ Files: `spliceai_pipeline/normalize.py`, `vcfio.py`, `score.py`, `snpeff.py`,
   files present); red when missing, opening the install dialog.
 - **The whole window scrolls**, so small screens work; the window also starts no
   bigger than the screen, and the results table keeps a usable minimum height.
+
+**One screen you can read, not a form to fill in (2026-09-14).** Everything
+that comes with Setup stopped asking to be configured, and the results table
+started showing which variants matter.
+
+- **Order.** Results first, with Run / Pause / End under them, then the VCF,
+  then Settings -- and the three are panes of a splitter, so the line between
+  any two can be dragged. Where they are left is remembered (`pane_sizes`). The
+  VCF box shrank to a few lines: a loaded VCF is read from its file, not from
+  what is on show there.
+- **Advanced settings.** Settings now holds only the two real per-run choices,
+  raw/masked and precomputed data. The genome build, the reference FASTAs,
+  SnpEff and MANE moved behind one button, with a line saying whether
+  everything is in place. It opens by itself when something isn't. The build
+  stays visible read-only -- scoring against the wrong one is wrong quietly.
+- **SnpEff is on by default** (it ships with Setup), applied once to an
+  existing settings file. Turning it off now says what that costs, MANE
+  included, instead of leaving a gap where its rows were.
+- **A Region column**, from SnpEff's own `ANN` effect and rank: `Intron 21/33`,
+  `Exon 23/23`, `5' UTR`, `Upstream`, `Intergenic`. Always from the same
+  transcript the Transcript column names. Also written to the results file.
+- **Columns reordered** to gene, transcript, variant, region, then the max
+  score, then the eight scores it came from, then its source. A column order
+  saved by an older version is dropped once, otherwise the new order would
+  never be seen.
+- **The max score is drawn, not just printed**: a bar filled in proportion and
+  a stripe down the row, coloured at SpliceAI's own 0.20 / 0.50 / 0.80 cutoffs
+  -- the same three values the filter buttons use, now read from one place.
+  Presentation only; sorting, filtering and export still see the number.
+- **One palette** (`spliceai_gui/theme.py`) instead of a dozen colours written
+  at the widgets that used them. One teal accent; green, amber and red kept for
+  meaning. Windows' own fonts, nothing bundled. Scrollbars and splitter handles
+  restyled to match.
+
+Files: `theme.py`, `score_delegate.py` (both new), `main_window.py`,
+`table_model.py`, `config.py`, `main.py`, `first_launch_dialog.py` (a contact
+address), `spliceai_pipeline/snpeff.py`, `mane.py`, `merge.py`, `writer.py`.
+
+**Java and MANE are found beside SnpEff (2026-09-14).** Setup puts `snpeff`,
+`java` and `mane` next to each other, but `find_java()` and the MANE lookup
+only ever searched next to the *app*. Running the program from anywhere else --
+from source, or after the install folder is moved -- reported "No Java 21+
+found" with a perfectly good Temurin 21 sitting beside the jar it had just
+found, and SnpEff then switched itself off. Both now also look one level up
+from the chosen SnpEff folder. Files: `spliceai_pipeline/snpeff.py`
+(`sibling_java_dir`), `mane.py` (`sibling_mane_dir`), `main_window.py`.
+
+**The reference genome finds itself (2026-09-14).** A new install asked for a
+file that was, on the USB drive, right next to Setup.exe -- the first thing a
+colleague saw was two empty "reference FASTA" rows and a note about browsing or
+downloading 3 GB. Two changes, and between them nobody should have to answer
+that question again:
+
+- Setup, when it is run from a drive that carries a `reference-data` folder,
+  offers to **copy the genomes to `~\SpliceAI_reference_data`** (about 6 GB,
+  ticked by default; it checks there is room, and doesn't copy again over an
+  existing install). Declining still installs everything else.
+- The program **looks for them itself** every time it opens: the
+  `SPLICEAI_REF_DIR` override, `~\SpliceAI_reference_data`, a `reference-data`
+  folder next to the exe, then `reference-data` / `SpliceAI-USB-*` on each fixed
+  and removable drive -- local disks before removable ones, so a copy on the PC
+  wins over the same file on a drive that can be unplugged. A file only counts
+  if its name says which build it is (a wrong build gives wrong scores, quietly)
+  and its `.fa.fai` index is next to it. A path already saved in the settings is
+  never overridden -- only an empty one, or one whose file has gone.
+
+The two FASTA rows are now **folded away behind "Reference files..."**, with one
+line in their place saying which builds are ready and where they were found.
+They start open only when a reference still has to be found, and the
+first-launch reference note is skipped entirely when the files were located.
+Files: `spliceai_gui/reference_locator.py` (new), `main_window.py`,
+`reference_note.py`, `main.py`, `installer/SpliceAI-VariantScoring.iss`; checks
+in `tests/test_reference_locator.py`.
+
+**Downloads work on networks that inspect HTTPS (2026-09-14).** On a PC whose
+network (or antivirus) re-signs secure connections -- common in hospitals --
+every download in the app failed with an error Windows itself accepts:
+`CERTIFICATE_VERIFY_FAILED: Missing Authority Key Identifier`. Python checks
+certificates with its own bundled list; the Windows installer had always used
+Windows' own (hence SpliceAI downloading fine there while "Download
+reference..." failed). All downloads -- reference FASTA, SnpEff, Java, MANE and
+the app's own SpliceAI install -- now verify through Windows via `truststore`
+(the approach pip takes), and a certificate failure explains what to do
+(copy the files from the USB drive, or ask IT) instead of showing only the raw
+error. Files: `spliceai_pipeline/net.py` (new), `mane.py`,
+`spliceai_gui/reference_download.py`, `java_download.py`; `truststore==0.10.4`
+in requirements.txt; checks in `tests/test_downloads.py`.
 
 **Drag and drop anywhere on the window (2026-09-11).** Before, only the VCF box
 took dropped files; elsewhere nothing happened, and a file dropped onto a path

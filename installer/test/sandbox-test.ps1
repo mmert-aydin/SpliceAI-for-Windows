@@ -156,6 +156,18 @@ switch ($Scenario) {
     "offline" { Check "install.offline_handled" ($setupLog -match "SpliceAI download failed") "download failure logged, Setup finished" }
     "offline-usb-wheel" { Check "install.spliceai_source" ($setupLog -match "Using local SpliceAI wheel") "used wheel from C:\USB" }
 }
+# Setup copies the drive's reference-data here when it is run from the USB;
+# it is also the first folder the program looks in (reference_locator.py).
+$userRef = "$env:USERPROFILE\SpliceAI_reference_data"
+if ($Scenario -eq "usb-reference") {
+    $refNames = "hg19.fa", "hg19.fa.fai", "hg38.fa", "hg38.fa.fai"
+    $missing = @($refNames | Where-Object { -not (Test-Path "$userRef\$_") })
+    Check "reference.copied_by_setup" (-not $missing) "missing: $($missing -join ', ') in $userRef"
+    $short = @($refNames | Where-Object {
+        (Test-Path "$userRef\$_") -and (Get-Item "$userRef\$_").Length -ne (Get-Item "C:\USB\reference-data\$_").Length })
+    Check "reference.copy_is_complete" (-not $short) "wrong size: $($short -join ', ')"
+}
+
 $wsh = New-Object -ComObject WScript.Shell
 Check "install.desktop_shortcut" ((Test-Path $desktopLnk) -and $wsh.CreateShortcut($desktopLnk).TargetPath -eq $exe)
 Check "install.startmenu_shortcut" ((Test-Path $startLnk) -and $wsh.CreateShortcut($startLnk).TargetPath -eq $exe)
@@ -163,7 +175,10 @@ Check "install.uninstall_entry" (Test-Path "HKCU:\Software\Microsoft\Windows\Cur
 $spliceaiStamp = if ($hasSpliceAI) { (Get-Item "$app\_internal\spliceai\utils.py").LastWriteTimeUtc } else { $null }
 
 # --- 2. score -----------------------------------------------------------------
-$cli = Run-Cli "ankrd26" @("C:\TestData\ankrd26.vcf", "--build", "hg19", "--mode", "masked", "--fasta", "C:\Ref\hg19.fa", "-o", "C:\Results\ankrd26.tsv") 900
+# usb-reference scores from the copy Setup made, not from the harness's mapped
+# C:\Ref -- that is what proves the copied files are intact and usable.
+$hg19 = if ($Scenario -eq "usb-reference") { "$userRef\hg19.fa" } else { "C:\Ref\hg19.fa" }
+$cli = Run-Cli "ankrd26" @("C:\TestData\ankrd26.vcf", "--build", "hg19", "--mode", "masked", "--fasta", $hg19, "-o", "C:\Results\ankrd26.tsv") 900
 if ($expectSpliceAI) {
     $row = if (Test-Path "$R\ankrd26.tsv") { Read-Tsv "$R\ankrd26.tsv" | Select-Object -First 1 }
     Check "score.ankrd26_DS_AG_0.29" ($cli.exit -eq 0 -and $row.gene -eq "ANKRD26" -and $row.DS_AG -eq "0.29") "exit $($cli.exit), $($cli.seconds) s, gene=$($row.gene) DS_AG=$($row.DS_AG)"
@@ -192,7 +207,13 @@ foreach ($n in 1, 2) {
     $setupShown = $g.titles -contains "SpliceAI Setup Required"
     Check "gui.launch${n}_setup_dialog_as_expected" ($setupShown -ne $expectSpliceAI) "SpliceAI Setup dialog shown: $setupShown"
     Check "gui.launch${n}_no_network" (-not $g.remote) ($g.remote -join ", ")
-    if ($n -eq 1) { Check "gui.reference_note_shown" ($g.titles -contains "Reference data") }
+    if ($n -eq 1) {
+        if ($Scenario -eq "usb-reference") {
+            Check "gui.reference_note_skipped" (-not ($g.titles -contains "Reference data")) ($g.titles -join " | ")
+        } else {
+            Check "gui.reference_note_shown" ($g.titles -contains "Reference data")
+        }
+    }
 }
 if ($hasSpliceAI) {
     Check "relaunch.nothing_reinstalled" (((Get-Item "$app\_internal\spliceai\utils.py").LastWriteTimeUtc -eq $spliceaiStamp) -and -not (Get-ChildItem $packagesDir -ErrorAction SilentlyContinue)) "python-packages empty, SpliceAI files untouched"
@@ -205,6 +226,11 @@ for ($i = 0; $i -lt 90 -and (Test-Path $app); $i++) { Start-Sleep 2 }
 Check "uninstall.folder_removed" (-not (Test-Path $app))
 Check "uninstall.shortcuts_removed" (-not (Test-Path $desktopLnk) -and -not (Test-Path $startLnk))
 Check "uninstall.entry_removed" (-not (Test-Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$AppId"))
+# The genomes are the user's data, and a reinstall reuses them: uninstalling
+# must not take 6 GB away.
+if ($Scenario -eq "usb-reference") {
+    Check "uninstall.reference_data_kept" ((Test-Path "$userRef\hg19.fa") -and (Test-Path "$userRef\hg38.fa")) $userRef
+}
 
 # --- report -----------------------------------------------------------------------
 # Summary first (plain text), JSON second; DONE is written whatever happens so

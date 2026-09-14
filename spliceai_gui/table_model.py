@@ -3,7 +3,17 @@ sorting and combined gene-search + score-threshold filtering.
 """
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel, Qt
 
+from . import theme
+
 SORT_ROLE = Qt.UserRole + 1
+
+# Shown in a monospaced font: every column whose value is read as digits or as
+# an identifier, so decimal points and accessions line up down the column.
+MONO_COLUMNS = {
+    "variant_id", "snpeff_transcript", "snpeff_hgvs_c", "chrom", "pos", "alteration",
+    "ref", "alt", "allele_fraction", "max_score",
+    "DS_AG", "DP_AG", "DS_AL", "DP_AL", "DS_DG", "DP_DG", "DS_DL", "DP_DL",
+}
 
 # (header label, ScoreRow attribute, kind) for each results-table column, in
 # display order; kind ("str"/"int"/"float") picks formatting and sort handling.
@@ -12,18 +22,17 @@ SORT_ROLE = Qt.UserRole + 1
 # comment lines like these keep line numbers where they were, which Python 3.13
 # bakes into class definitions.)
 
+# Order: what identifies the variant (gene, transcript, where it sits), then
+# the answer (max score), then the eight scores it came from, then where the
+# answer came from. Columns can still be dragged into any other order, and
+# where they are left is remembered (config "column_order").
 COLUMNS = [
-    ("Variant Id", "variant_id", "str"),
     ("Gene", "gene", "str"),
     ("Transcript", "snpeff_transcript", "str"),
+    ("Variant Id", "variant_id", "str"),
+    ("Region", "snpeff_region", "str"),
     ("Hgvs", "snpeff_hgvs_c", "str"),
-    ("Crom", "chrom", "str"),
-    ("Position", "pos", "int"),
-    ("Alteration", "alteration", "str"),
-    ("Allele Fraction", "allele_fraction", "float"),
     ("Max Score", "max_score", "float"),
-    ("Ref", "ref", "str"),
-    ("Alt", "alt", "str"),
     ("DS AG", "DS_AG", "float"),
     ("DP AG", "DP_AG", "int"),
     ("DS AL", "DS_AL", "float"),
@@ -33,6 +42,12 @@ COLUMNS = [
     ("DS DL", "DS_DL", "float"),
     ("DP DL", "DP_DL", "int"),
     ("Source", "source", "str"),
+    ("Crom", "chrom", "str"),
+    ("Position", "pos", "int"),
+    ("Alteration", "alteration", "str"),
+    ("Ref", "ref", "str"),
+    ("Alt", "alt", "str"),
+    ("Allele Fraction", "allele_fraction", "float"),
 ]
 
 
@@ -52,6 +67,13 @@ MAX_SCORE_COLUMN = _column_index("max_score")
 # Header tooltips, keyed by ScoreRow attribute name; columns not listed here
 # get no tooltip.
 COLUMN_TOOLTIPS = {
+    "snpeff_region": (
+        "Where in the gene the variant falls, from SnpEff, for the same transcript shown in "
+        "the Transcript column: \"Intron 5/26\" is the 5th of 26 introns, \"Exon 3/27\" the 3rd "
+        "of 27 exons. \"Upstream\" is within 5 kb before the transcript starts (the promoter "
+        "region); \"Downstream\", \"5' UTR\", \"3' UTR\" and \"Intergenic\" as named. Blank "
+        "without SnpEff."
+    ),
     "allele_fraction": (
         "Allele fraction, read from the input VCF's AF field (INFO or FORMAT/sample) if "
         "present; otherwise computed from AD (allelic depth) as alt / (ref + alt) if "
@@ -112,6 +134,12 @@ class ScoreTableModel(QAbstractTableModel):
 
         if role == SORT_ROLE:
             return sort_key_value(row, attr, kind)
+
+        if role == Qt.FontRole and attr in MONO_COLUMNS:
+            return theme.mono_font()
+
+        if role == Qt.TextAlignmentRole and kind in ("float", "int"):
+            return int(Qt.AlignRight | Qt.AlignVCenter)
 
         return None
 

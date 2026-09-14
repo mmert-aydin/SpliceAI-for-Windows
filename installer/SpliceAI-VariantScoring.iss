@@ -10,6 +10,9 @@
 ;     Setup -- see LICENSE-THIRD-PARTY.md), checks its SHA-256, and unpacks
 ;     it into the app's _internal folder. A copy of the exact same wheel
 ;     placed next to Setup.exe is used instead of downloading (offline PCs).
+;   - copies the reference genomes to ~\SpliceAI_reference_data when a
+;     reference-data folder sits next to Setup.exe (the USB layout), so the
+;     program finds them by itself and never asks the user for a file.
 
 #ifndef AppVersion
   #error Run build.ps1 instead of compiling this script directly.
@@ -68,6 +71,11 @@ ExtraDiskSpaceRequired=30000000
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Shortcuts:"
+; Only offered when Setup.exe has a reference-data folder beside it (the USB
+; layout). Copying the genomes onto the PC is what lets the program find them
+; by itself afterwards, with the drive unplugged -- see
+; spliceai_gui/reference_locator.py, which looks here first.
+Name: "referencedata"; Description: "&Copy the reference genomes to this PC (about 6 GB)"; GroupDescription: "Reference genomes:"; Check: ReferenceDataBeside
 
 [Files]
 ; The app itself (PyInstaller onedir; SpliceAI is excluded from it).
@@ -82,6 +90,12 @@ Source: "{#ThirdPartyDir}\vcruntime\*.dll"; DestDir: "{app}"; Flags: ignoreversi
 Source: "{#ThirdPartyDir}\java\*"; DestDir: "{app}\java"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#ThirdPartyDir}\snpeff\*"; DestDir: "{app}\snpeff"; Excludes: "\snpEff\examples,\snpEff\galaxy,\snpEff\.claude,*.log"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#ThirdPartyDir}\mane\*"; DestDir: "{app}\mane"; Flags: ignoreversion recursesubdirs createallsubdirs
+; The reference genomes, if they are on the drive next to Setup.exe. "external"
+; = not compiled into Setup (they are far too big, and they are public
+; reference files, not part of this program); "onlyifdoesntexist" so
+; reinstalling doesn't copy 6 GB again; "uninsneveruninstall" because they are
+; the user's data and are worth keeping for a reinstall.
+Source: "{src}\reference-data\*"; DestDir: "{code:ReferenceDataDir}"; Tasks: referencedata; Flags: external skipifsourcedoesntexist onlyifdoesntexist uninsneveruninstall recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
@@ -113,6 +127,71 @@ var
 function InternalDir: String;
 begin
   Result := ExpandConstant('{app}\_internal');
+end;
+
+{ Where the reference genomes are copied to. The program looks here first
+  (spliceai_gui/reference_locator.py, USER_REFERENCE_DIR) and it is also where
+  the program's own "Download reference..." puts them, so the two agree. }
+function ReferenceDataDir(Param: String): String;
+begin
+  Result := ExpandConstant('{%USERPROFILE}\SpliceAI_reference_data');
+end;
+
+function ReferenceDataSrc: String;
+begin
+  Result := ExpandConstant('{src}\reference-data');
+end;
+
+{ True when Setup.exe was started from a drive that carries the genomes -- the
+  only case where there is anything to copy. }
+function ReferenceDataBeside: Boolean;
+begin
+  Result := FileExists(ReferenceDataSrc + '\hg19.fa') or
+            FileExists(ReferenceDataSrc + '\hg38.fa');
+end;
+
+function ReferenceDataSize: Int64;
+var
+  Rec: TFindRec;
+begin
+  Result := 0;
+  if FindFirst(ReferenceDataSrc + '\*', Rec) then
+  try
+    repeat
+      if Rec.Attributes and FILE_ATTRIBUTE_DIRECTORY = 0 then
+        Result := Result + (Int64(Rec.SizeHigh) shl 32) + Rec.SizeLow;
+    until not FindNext(Rec);
+  finally
+    FindClose(Rec);
+  end;
+end;
+
+{ False cancels the page change. Asks before starting a multi-GB copy that
+  would fill the disk -- Setup can't undo a failed one, and the genomes go to
+  the user's profile, which is often on a smaller drive than it looks. }
+function ReferenceDataFits: Boolean;
+var
+  Needed, FreeBytes, TotalBytes: Int64;
+begin
+  Result := True;
+  if not WizardIsTaskSelected('referencedata') then
+    Exit;
+  Needed := ReferenceDataSize;
+  if (Needed = 0) or not GetSpaceOnDisk64(ExpandConstant('{%USERPROFILE}'), FreeBytes, TotalBytes) then
+    Exit;
+  { A gigabyte over, so Windows isn't left with nothing. }
+  if FreeBytes >= Needed + 1073741824 then
+    Exit;
+  Result := SuppressibleTaskDialogMsgBox('Not enough free space for the reference genomes',
+    'Copying them needs about ' + IntToStr(Needed div 1073741824) + ' GB, and this drive has ' +
+    IntToStr(FreeBytes div 1073741824) + ' GB free.' + #13#10#13#10 +
+    'You can install without copying them and pick the files from the drive in the program ' +
+    'later (it keeps working only while the drive is plugged in), or free up space and run ' +
+    'Setup again.',
+    mbConfirmation, MB_YESNO, ['&Install without copying', '&Go back'], 0, IDNO) = IDYES;
+  { The leading * keeps the other tasks (the desktop shortcut) as they are. }
+  if Result then
+    WizardSelectTasks('*!referencedata');
 end;
 
 function SpliceAIPresent: Boolean;
@@ -190,6 +269,11 @@ end;
 function NextButtonClick(CurPageID: Integer): Boolean;
 begin
   Result := True;
+  if CurPageID = wpSelectTasks then
+  begin
+    Result := ReferenceDataFits;
+    Exit;
+  end;
   if CurPageID <> wpReady then
     Exit;
   WheelPath := '';

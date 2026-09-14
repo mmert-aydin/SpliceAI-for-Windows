@@ -55,6 +55,11 @@ FIRST_LAUNCH_SECTIONS = [
 ]
 
 
+# Where to send bugs and suggestions -- shown just above the signature.
+CONTACT_EMAIL = "aydinn.mmert@gmail.com"
+CONTACT_LEAD = "Bugs, fixes and suggestions"
+CONTACT_TEXT = f"{CONTACT_LEAD}: {CONTACT_EMAIL}"
+
 # Shown right-aligned under the notice, in a handwriting-style font when one
 # is installed (see FirstLaunchDialog.__init__).
 SIGNATURE_TEXT = "— MMA"
@@ -109,6 +114,14 @@ class FirstLaunchDialog(QDialog):
         body_label.setTextFormat(Qt.RichText)
         body_label.setWordWrap(True)
         layout.addWidget(body_label)
+
+        self.contact_label = QLabel(
+            f'{CONTACT_LEAD}: <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a>'
+        )
+        self.contact_label.setTextFormat(Qt.RichText)
+        self.contact_label.setOpenExternalLinks(True)
+        self.contact_label.setToolTip("Opens your e-mail program")
+        layout.addWidget(self.contact_label, alignment=Qt.AlignRight)
 
         self.signature_label = QLabel(SIGNATURE_TEXT)
         signature_family = _pick_signature_font_family()
