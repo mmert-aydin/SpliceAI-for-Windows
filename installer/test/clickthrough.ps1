@@ -195,8 +195,11 @@ Check "app.no_spliceai_setup_dialog" (-not (Find-Window '^SpliceAI Setup Require
 if ($note) { Act (Find-In $note '^OK$' "Button") "Reference data" "{ENTER}" { -not (Find-Window '^Reference data$') } | Out-Null }
 
 # --- 3. the SpliceAI check button ------------------------------------------------------
-$btn = Find-In $main 'SpliceAI found'
-Check "app.spliceai_button_green" $btn ($btn.Current.Name)
+# The top-bar status pill (theme.pill): "SpliceAI ready" when it is installed,
+# "SpliceAI not installed" when it isn't -- clicking either opens the check.
+$btn = Find-In $main 'SpliceAI ready'
+$btnName = if ($btn) { $btn.Current.Name } else { "no 'SpliceAI ready' pill in the top bar" }
+Check "app.spliceai_button_green" $btn $btnName
 $how = Act $btn "SpliceAI Variant Scoring" $null { Find-Window '^SpliceAI check$' }
 $chk = Find-Window '^SpliceAI check$'
 Shot "app-spliceai-check"
