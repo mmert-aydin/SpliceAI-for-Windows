@@ -16,10 +16,10 @@
   Java, MANE, VC++ runtime DLLs into installer\thirdparty).
 
 .EXAMPLE
-  powershell -ExecutionPolicy Bypass -File installer\build.ps1 -Version 1.1.0
+  powershell -ExecutionPolicy Bypass -File installer\build.ps1 -Version 1.1.1
 #>
 param(
-    [string]$Version = "1.1.0",
+    [string]$Version = "1.1.1",
     # Reuse the last PyInstaller output (only re-compile the installer).
     [switch]$SkipAppBuild
 )

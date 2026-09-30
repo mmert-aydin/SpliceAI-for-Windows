@@ -35,7 +35,7 @@ Python or the command line. Install it, drop in a VCF, press Run.
 
 ## Download and install
 
-1. Download `SpliceAI-VariantScoring-Setup-1.1.0.exe` from the
+1. Download `SpliceAI-VariantScoring-Setup-1.1.1.exe` from the
    [latest release](https://github.com/mmert-aydin/SpliceAI-for-Windows/releases/latest).
 2. Run it. The installer isn't digitally signed, so Windows may say
    *"Windows protected your PC"*: click **More info**, then **Run anyway**.

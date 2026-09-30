@@ -3,13 +3,15 @@
 Exact inputs of the current Setup.exe, so a rebuild can reproduce it. Update
 this file whenever a pin changes. (Not user-facing.)
 
-Built: 2026-09-14 on Windows 10 Pro 22H2 (10.0.19045), Setup version 1.1.0.
+Built: 2026-09-30 on Windows 10 Pro 22H2 (10.0.19045), Setup version 1.1.1.
+(1.1.0 was built 2026-09-14 on another PC with Python 3.13.1; everything else
+below is the same for both.)
 
 ## Build tools
 
 | Tool | Version |
 |---|---|
-| Python (build venv `.venv`) | 3.13.1 (python.org, `%LOCALAPPDATA%\Programs\Python\Python313`) |
+| Python (build venv `.venv`) | 3.13.2 (python.org, `%LOCALAPPDATA%\Programs\Python\Python313`) |
 | pip | 24.3.1 |
 | PyInstaller | 6.22.2 (pyinstaller-hooks-contrib 2026.7) |
 | Inno Setup | 6.7.3 (`winget install --id JRSoftware.InnoSetup -e --scope user`) |
@@ -65,6 +67,7 @@ tensorboard==2.20.0
 tensorboard-data-server==0.7.2
 tensorflow==2.20.0
 termcolor==3.3.0
+truststore==0.10.4
 typing_extensions==4.16.0
 tzdata==2026.3
 urllib3==2.7.0
@@ -124,10 +127,14 @@ vcruntime140_threads.dll  18186DD0AF0E8CB6B0111ADB585AD70DD555C1C6950ECA7BA3A490
 
 ## Output
 
+Build on a PC whose PATH has no folder with `ucrtbase.dll` in it (a JDK's `bin`
+folder does): PyInstaller would otherwise also bundle the Universal CRT, which
+Windows 10 and 11 ignore in favour of their own.
+
 | | |
 |---|---|
-| Setup.exe | `SpliceAI-VariantScoring-Setup-1.1.0.exe` |
-| Size | 1,412,701,123 bytes (1.32 GB; LZMA2 ultra64, solid) |
-| SHA-256 | `423867687BCC3133B4F2ECF033672D28FCDB66CF9B90025CDAC3AEE5B2519B06` |
-| Includes | everything in 1.0.0, plus (2026-09-14, see docs/DEVELOPMENT.md): downloads verified through Windows' certificate store; the reference genomes found automatically and copied by Setup from a drive that carries them; the reworked window (results first, draggable panes, Advanced settings, one palette); the Region column and the drawn max score; SnpEff on by default; Java and MANE found beside the SnpEff folder |
+| Setup.exe | `SpliceAI-VariantScoring-Setup-1.1.1.exe` |
+| Size | 1,412,667,310 bytes (1.32 GB; LZMA2 ultra64, solid) |
+| SHA-256 | `28ED69735B1A041CC2922726DA5C7C6F20A093BA341A877CB0CB4D3268D27237` |
+| Includes | 1.1.1: 1.1.0 rebuilt without development file names in its docstrings (see docs/DEVELOPMENT.md). 1.1.0: everything in 1.0.0, plus (2026-09-14, see docs/DEVELOPMENT.md): downloads verified through Windows' certificate store; the reference genomes found automatically and copied by Setup from a drive that carries them; the reworked window (results first, draggable panes, Advanced settings, one palette); the Region column and the drawn max score; SnpEff on by default; Java and MANE found beside the SnpEff folder |
 | Installed size | app 1.30 GB + SnpEff/Java/MANE ~1.3 GB + SpliceAI 25 MB |

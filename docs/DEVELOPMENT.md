@@ -104,10 +104,10 @@ Setup.exe is used instead of downloading.
 ```
 winget install --id JRSoftware.InnoSetup -e --scope user   # once
 powershell -ExecutionPolicy Bypass -File installer\fetch-thirdparty.ps1   # fresh checkout only
-powershell -ExecutionPolicy Bypass -File installer\build.ps1 -Version 1.1.0
+powershell -ExecutionPolicy Bypass -File installer\build.ps1 -Version 1.1.1
 ```
 
-Result: `installer\output\SpliceAI-VariantScoring-Setup-1.1.0.exe`.
+Result: `installer\output\SpliceAI-VariantScoring-Setup-1.1.1.exe`.
 
 - `installer\SpliceAI-VariantScoring.iss` is the Inno Setup script; `build.ps1`
   builds the app with PyInstaller into `installer\build` and passes it the
@@ -124,7 +124,7 @@ Result: `installer\output\SpliceAI-VariantScoring-Setup-1.1.0.exe`.
 ## Changes since recovery
 
 Each entry is dated. The 2026-09-10/11 entries make up 1.0; the 2026-09-14
-entries are what 1.1.0 added.
+entries are what 1.1.0 added; 1.1.1 is the last entry.
 
 **"Download SnpEff…" no longer needs Java installed by hand (2026-09-10).**
 
@@ -361,6 +361,14 @@ broken record). Settings, gene lists and VCFs are now read as `utf-8-sig`; VCFs
 also replace undecodable header characters instead of failing. Files:
 `spliceai_gui/config.py`, `gene_list_storage.py`, `main_window.py`,
 `spliceai_pipeline/vcfio.py`; checks in `tests/`.
+
+**1.1.1: rebuilt for the public release (2026-09-30).** No change in what
+the program does. A few docstrings and comments used the names of real VCF
+files from development as examples; they now use made-up names. Python keeps
+docstrings inside the compiled program, so Setup.exe was rebuilt to leave the
+old names out of it too. Built on a second PC with Python 3.13.2 (1.1.0 used
+3.13.1); every other pinned version and bundled file is the same, see
+`installer/BUNDLED-VERSIONS.md`.
 
 ## Still open
 
