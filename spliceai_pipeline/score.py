@@ -62,8 +62,6 @@ def _patch_one_hot_encode():
 _patch_one_hot_encode()
 
 # Imported only after _patch_one_hot_encode() (above) has run.
-# (Original comments weren't recoverable from the compiled program; blank and
-# comment lines like these keep line numbers where they were.)
 from spliceai.utils import Annotator, get_delta_scores
 
 logging.getLogger().setLevel(logging.ERROR)

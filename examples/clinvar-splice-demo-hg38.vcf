@@ -1,0 +1,20 @@
+##fileformat=VCFv4.2
+##reference=hg38
+##source=Public ClinVar variants (GRCh38) for trying the program. ID = ClinVar Variation ID. No patient data.
+##demo_variant=VCV000092870: ABCA4 c.5461-10T>C, Pathogenic
+##demo_variant=VCV000428116: APC c.1548G>A (p.Lys516=), Pathogenic/Likely pathogenic
+##demo_variant=VCV000007166: CFTR c.3718-2477C>T (deep intronic), Pathogenic
+##demo_variant=VCV000260461: ANKRD26 c.2376-16A>G, Benign/Likely benign
+##demo_variant=VCV000042513: MYBPC3 c.1227-13G>A, Pathogenic/Likely pathogenic
+##demo_variant=VCV000003021: ATM c.5763-1050A>G (deep intronic), Pathogenic
+##demo_variant=VCV000038164: BRCA2 c.8488-1G>A, Pathogenic
+##demo_variant=VCV000128075: CHEK2 c.444+1G>A, Pathogenic/Likely pathogenic
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+chr1	94011395	VCV000092870	A	G	.	.	.
+chr5	112827247	VCV000428116	G	A	.	.	.
+chr7	117639961	VCV000007166	C	T	.	.	.
+chr10	27038070	VCV000260461	T	C	.	.	.
+chr11	47343158	VCV000042513	C	T	.	.	.
+chr11	108309110	VCV000003021	A	G	.	.	.
+chr13	32370955	VCV000038164	G	A	.	.	.
+chr22	28725242	VCV000128075	C	T	.	.	.

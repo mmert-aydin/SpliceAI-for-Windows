@@ -43,10 +43,6 @@ from .control import RunCancelled
 # Default install root: a "snpeff" folder next to the app (see
 # app_paths.app_root_dir()); the jar and databases live in its "snpEff"
 # subfolder (see snpeff_jar_path()).
-#
-# (Original comments weren't recoverable from the compiled program; blank and
-# comment lines like these keep line numbers where they were, which Python 3.13
-# bakes into class definitions.)
 DEFAULT_SNPEFF_DIR = os.path.join(app_root_dir(), "snpeff")
 
 # Oldest Java major version SnpEff will run on. find_java() skips anything

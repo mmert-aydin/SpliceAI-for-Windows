@@ -10,9 +10,6 @@ FIELDNAMES = [
     "snpeff_region",
 ]
 
-# (Original comments weren't recoverable from the compiled program; blank and
-# comment lines like these keep line numbers where they were, which Python 3.13
-# bakes into class definitions.)
 
 
 # Columns read_rows() requires in a results file; the SnpEff and

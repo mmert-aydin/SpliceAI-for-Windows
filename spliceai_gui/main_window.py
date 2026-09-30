@@ -56,16 +56,12 @@ PAUSED_PREFIX = "⏸ Paused -- "
 # apart (see score_delegate.THRESHOLDS for what each one means).
 THRESHOLDS = tuple(sorted(lower for lower, _colour in SCORE_THRESHOLDS))
 
-# (Original comments weren't recoverable from the compiled program; blank and
-# comment lines like these keep line numbers where they were.)
 
 # Rows per page in the results table (see _refresh_page, _on_prev_page and
 # _on_next_page).
 #
 RESULTS_PAGE_SIZE = 100
 
-# (Original comments weren't recoverable from the compiled program; blank and
-# comment lines like these keep line numbers where they were.)
 
 
 
@@ -286,8 +282,6 @@ def _read_vcf_text(path):
     except OSError as exc:
         raise RuntimeError(f"could not read file to detect compression: {exc}") from exc
 
-    # (Original comments weren't recoverable from the compiled program; blank and
-    # comment lines like these keep line numbers where they were.)
     try:
         opener = gzip.open if is_gz else open
         # utf-8-sig: drops a byte-order mark, which would otherwise sit in front
@@ -452,8 +446,6 @@ class MainWindow(QMainWindow):
         self._update_precomputed_enabled()
         self._update_run_enabled()
 
-    # (Original comments weren't recoverable from the compiled program; blank and
-    # comment lines like these keep line numbers where they were.)
     def _build_ui(self):
         # Everything sits in one scroll area, so the window still works on a
         # small screen (or a small window): it scrolls instead of squeezing.
@@ -551,8 +543,6 @@ class MainWindow(QMainWindow):
 
         # Status button for the SpliceAI install (see _update_spliceai_status_indicator
         # and _on_spliceai_status_clicked).
-        # (Original comments weren't recoverable from the compiled program; blank and
-        # comment lines like these keep line numbers where they were.)
         self.spliceai_status_button = QPushButton()
         self.spliceai_status_button.setStyleSheet(theme.pill("crit"))
         self.spliceai_status_button.setCursor(Qt.PointingHandCursor)
@@ -691,8 +681,6 @@ class MainWindow(QMainWindow):
         self.build_combo.addItems(list(BUILDS))
         self.build_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         self.build_combo.setMinimumWidth(100)
-        # (Original comments weren't recoverable from the compiled program; blank and
-        # comment lines like these keep line numbers where they were.)
         self.build_combo.currentTextChanged.connect(self._update_run_enabled)
         self.build_combo.currentTextChanged.connect(self._on_build_changed)
         # Where the selected build came from -- the VCF's own header, when it
@@ -836,8 +824,6 @@ class MainWindow(QMainWindow):
         snpeff_opt_row.addStretch(1)
         advanced_layout.addLayout(snpeff_opt_row)
 
-        # (Original comments weren't recoverable from the compiled program; blank and
-        # comment lines like these keep line numbers where they were.)
 
         # The SnpEff install-folder row and the MANE Select row share one
         # container widget, snpeff_config_widget, which is added to the
@@ -1044,9 +1030,6 @@ class MainWindow(QMainWindow):
         # page_table_model is a second ScoreTableModel; the table view below is
         # attached to it rather than to proxy_model (see _refresh_page and
         # RESULTS_PAGE_SIZE).
-        #
-        # (Original comments weren't recoverable from the compiled program; blank and
-        # comment lines like these keep line numbers where they were.)
 
         self.page_table_model = ScoreTableModel()
 
@@ -1069,14 +1052,9 @@ class MainWindow(QMainWindow):
 
         # sort(-1) is Qt's "no sort column": the proxy keeps the source
         # model's row order.
-        #
-        # (Original comments weren't recoverable from the compiled program; blank and
-        # comment lines like these keep line numbers where they were.)
         self.proxy_model.sort(-1)
         self.table_view.horizontalHeader().sortIndicatorChanged.connect(self._on_sort_indicator_changed)
 
-        # (Original comments weren't recoverable from the compiled program; blank and
-        # comment lines like these keep line numbers where they were.)
 
         self.table_view.horizontalHeader().setHighlightSections(False)
         self.table_view.verticalHeader().setHighlightSections(False)
@@ -1084,9 +1062,6 @@ class MainWindow(QMainWindow):
         # The "ref" and "alt" columns are hidden in the view: each one's index
         # is looked up in COLUMNS (3-tuples whose middle item is the row
         # attribute name).
-        #
-        # (Original comments weren't recoverable from the compiled program; blank and
-        # comment lines like these keep line numbers where they were.)
 
         for hidden_attr in ("ref", "alt"):
             hidden_col = next(i for i, (_, attr, _) in enumerate(COLUMNS) if attr == hidden_attr)
@@ -1107,8 +1082,6 @@ class MainWindow(QMainWindow):
 
         return group
 
-    # (Original comments weren't recoverable from the compiled program; blank and
-    # comment lines like these keep line numbers where they were.)
     def _load_settings(self):
         settings = config.load()
         # Fills in any reference FASTA that isn't set (or whose saved file has
@@ -1156,8 +1129,6 @@ class MainWindow(QMainWindow):
             precomputed_mode = None
         # Starts from config.load() and update()s only the keys below, so any
         # other keys already saved are kept.
-        # (Original comments weren't recoverable from the compiled program; blank and
-        # comment lines like these keep line numbers where they were.)
         settings = config.load()
         settings.update({
             **{config.fasta_key(build): edit.text().strip() for build, edit in self.fasta_edits.items()},
@@ -1228,8 +1199,6 @@ class MainWindow(QMainWindow):
         self._cleanup_temp_vcf()
         super().closeEvent(event)
 
-    # (Original comments weren't recoverable from the compiled program; blank and
-    # comment lines like these keep line numbers where they were.)
     def _on_load_file(self):
         path, _ = QFileDialog.getOpenFileName(
             self, "Load VCF file", "", "VCF files (*.vcf *.vcf.gz *.vcf.bgz *.bgz);;All files (*)"
@@ -1320,12 +1289,8 @@ class MainWindow(QMainWindow):
         self.compat_status_label.setStyleSheet("")
         # The compat label's text and tooltip are cleared by _on_vcf_text_changed,
         # which vcf_text.clear() above triggers through the textChanged signal.
-        #
-        # (Original comments weren't recoverable from the compiled program; blank and
-        # comment lines like these keep line numbers where they were.)
 
     def _on_vcf_text_changed(self):
-        # (Original comment line not recoverable from the compiled program.)
         self.compat_status_label.setText("")
         self.compat_status_label.setToolTip("")
         # Re-detect the build shortly after the text stops changing (typing or
@@ -1582,8 +1547,6 @@ class MainWindow(QMainWindow):
         # Everything still missing is listed in the Run button's tooltip
         # ("Before you can run: ..."); Run is enabled only when nothing is
         # missing and no worker is running.
-        # (Original comments weren't recoverable from the compiled program; blank and
-        # comment lines like these keep line numbers where they were.)
         missing = []
         if not has_vcf:
             missing.append("load a VCF")
@@ -1653,8 +1616,6 @@ class MainWindow(QMainWindow):
             self.snpeff_status_label.setStyleSheet(theme.STATUS_OK)
             self.snpeff_status_label.setToolTip("")
 
-        # (Original comments weren't recoverable from the compiled program; blank and
-        # comment lines like these keep line numbers where they were.)
         #
         # Not ready: the short message plus a pointer to "Download SnpEff...",
         # shown in gray (#5f5f5f), with the fuller detail message (which names
@@ -1770,8 +1731,6 @@ class MainWindow(QMainWindow):
             self.quick_gene_chips_layout.removeWidget(widget)
             # hide() takes the chip off screen immediately; deleteLater() frees
             # it once control returns to the Qt event loop.
-            # (Original comments weren't recoverable from the compiled program; blank and
-            # comment lines like these keep line numbers where they were.)
             widget.hide()
             widget.deleteLater()
         self._apply_quick_gene_filter()
@@ -1856,8 +1815,6 @@ class MainWindow(QMainWindow):
         index = self.table_view.indexAt(pos)
         if not index.isValid():
             return
-        # (Original comments weren't recoverable from the compiled program; blank and
-        # comment lines like these keep line numbers where they were.)
         row = self.page_table_model.row_at(index.row())
         menu = QMenu(self)
         copy_action = menu.addAction(f"Copy variant ID ({row.variant_id})")
@@ -2072,8 +2029,6 @@ class MainWindow(QMainWindow):
         # total_variants counts distinct (chrom, pos, ref, alt) tuples; the row
         # count can be higher (one row per matching gene/source, as the "Result
         # rows" line below says).
-        # (Original comments weren't recoverable from the compiled program; blank and
-        # comment lines like these keep line numbers where they were.)
         total_variants = len({(r.chrom, r.pos, r.ref, r.alt) for r in rows})
 
         n_precomputed = sum(1 for r in rows if r.source == "precomputed")
@@ -2196,8 +2151,6 @@ class MainWindow(QMainWindow):
         self.progress_bar.setRange(0, 1)
         self.progress_bar.setValue(1)
         self.progress_label.setText(f"Loaded {len(rows)} rows from {os.path.basename(path)}.")
-        # (Original comments weren't recoverable from the compiled program; blank and
-        # comment lines like these keep line numbers where they were.)
         # Summary is disabled: a loaded file has no run settings or duration.
         self.summary_button.setEnabled(False)
         self._last_run_settings = None

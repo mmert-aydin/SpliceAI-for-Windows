@@ -17,10 +17,6 @@ MONO_COLUMNS = {
 
 # (header label, ScoreRow attribute, kind) for each results-table column, in
 # display order; kind ("str"/"int"/"float") picks formatting and sort handling.
-#
-# (Original comments weren't recoverable from the compiled program; blank and
-# comment lines like these keep line numbers where they were, which Python 3.13
-# bakes into class definitions.)
 
 # Order: what identifies the variant (gene, transcript, where it sits), then
 # the answer (max score), then the eight scores it came from, then where the

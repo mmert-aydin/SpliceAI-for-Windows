@@ -7,8 +7,9 @@ bundled or redistributed** — not in the repository, the app, or its Windows
 installer: it is downloaded on each user's own PC, from PyPI, during Setup
 (or later by the app, if Setup couldn't). The Windows installer
 (`installer/`) does include SnpEff, the Temurin Java runtime, the NCBI MANE
-summary and the Microsoft Visual C++ runtime DLLs, whose licenses permit
-redistribution — see each section below.
+summary and the Microsoft Visual C++ runtime DLLs, and the app itself
+contains Python and the Python libraries it is built on; their licenses
+permit redistribution — see each section below.
 This file exists to give the fuller licensing picture beyond the short
 notice shown in the app's first-launch dialog; it is not legal advice, and
 compliance with each license below is the user's own responsibility.
@@ -236,6 +237,33 @@ application ("app-local" deployment).
 these DLLs next to the app's exe, so the app runs on PCs without the Visual
 C++ Redistributable and without admin rights. Nothing is installed
 system-wide.
+
+---
+
+## Python and the libraries frozen into the app
+
+**What it is:** the app is a PyInstaller build, so its `_internal` folder
+contains the Python 3.13 runtime and the Python packages listed in
+`requirements.txt` (full list in `installer/BUNDLED-VERSIONS.md`), unmodified.
+
+**Licenses** (from each package's own metadata):
+
+| Component | License |
+|---|---|
+| Python 3.13 | PSF License |
+| PySide6 / Qt 6 (`PySide6`, `shiboken6`) | LGPL-3.0 (used under the LGPL option) |
+| TensorFlow, Keras | Apache-2.0 |
+| NumPy | BSD-3-Clause (and bundled parts under 0BSD, MIT, Zlib, CC0) |
+| pandas, pyfaidx, h5py, protobuf | BSD-3-Clause |
+| Biopython | Biopython License Agreement (BSD-style) |
+| requests | Apache-2.0 |
+| truststore, setuptools | MIT |
+
+**About Qt (LGPL-3.0):** Qt and PySide6 are shipped as the unmodified,
+separate DLL/PYD files published by the Qt Company, loaded dynamically, so
+they can be replaced with another compatible build. Qt's source code is
+available at [download.qt.io](https://download.qt.io/) and PySide6's at
+[code.qt.io/pyside/pyside-setup](https://code.qt.io/cgit/pyside/pyside-setup.git/).
 
 ---
 

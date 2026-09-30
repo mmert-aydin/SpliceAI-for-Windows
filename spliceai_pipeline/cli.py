@@ -133,8 +133,6 @@ def run_pipeline_core(vcf_path, build, mode, fasta_path, precomputed_dir=None, s
             control.check()
 
     # Seconds spent in each phase, reported in the final "Done" message.
-    # (Original comments weren't recoverable from the compiled program; blank and
-    # comment lines like these keep line numbers where they were.)
     phase_seconds = {}
 
     t0 = time.time()
@@ -164,8 +162,6 @@ def run_pipeline_core(vcf_path, build, mode, fasta_path, precomputed_dir=None, s
     if use_snpeff:
         # The snpeff module is imported here, only when SnpEff annotation was
         # requested, rather than at the top of the file.
-        # (Original comments weren't recoverable from the compiled program; blank and
-        # comment lines like these keep line numbers where they were.)
         checkpoint()
         progress("Running SnpEff annotation...")
         from .snpeff import JavaNotFoundError, SnpEffNotSetUpError, run_snpeff_annotation
@@ -180,8 +176,6 @@ def run_pipeline_core(vcf_path, build, mode, fasta_path, precomputed_dir=None, s
         except (JavaNotFoundError, SnpEffNotSetUpError, RuntimeError) as exc:
             # On these errors the run continues without SnpEff annotations
             # (SnpEff is optional, unlike --fasta).
-            # (Original comments weren't recoverable from the compiled program; blank and
-            # comment lines like these keep line numbers where they were.)
             progress(f"  SnpEff annotation skipped: {exc}")
             snpeff_annotations = {}
         phase_seconds["snpeff"] = time.time() - t0
@@ -206,8 +200,6 @@ def run_pipeline_core(vcf_path, build, mode, fasta_path, precomputed_dir=None, s
         progress(f"  {n_found}/{len(normalized)} found in precomputed scores")
         precomputed.close()
 
-    # (Original comments weren't recoverable from the compiled program; blank and
-    # comment lines like these keep line numbers where they were.)
     to_live_score = [
         i for i in range(len(normalized))
         if not normalized[i].skip_reason and (precomputed_hits[i] is None or not skip_precomputed)

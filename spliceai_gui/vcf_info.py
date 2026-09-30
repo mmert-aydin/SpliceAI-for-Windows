@@ -17,10 +17,6 @@ from .vcf_check import data_lines
 
 # Maps a free-form "##reference=" value to one of the Build dropdown's
 # builds; the first pattern that matches wins.
-#
-# (The original comments weren't recoverable from the compiled program;
-# blank/comment lines like these keep every line where it was in the
-# original, which Python 3.13 bakes into class definitions.)
 _BUILD_ALIASES = [
     (re.compile(r"hg19|grch37|hs37d5|g1k_v37|\bb37\b", re.IGNORECASE), "hg19"),
     (re.compile(r"hg38|grch38|hs38|\bb38\b", re.IGNORECASE), "hg38"),

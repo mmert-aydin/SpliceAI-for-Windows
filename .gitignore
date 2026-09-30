@@ -19,3 +19,14 @@ installer/build/
 installer/output/
 installer/test/results/
 tests/.cache/
+
+# Variant files and result tables can hold patient data: none are committed,
+# except the public demo and test VCFs below.
+*.vcf
+*.vcf.gz
+*.bgz
+*.tsv
+*.csv
+*.xlsx
+!examples/*.vcf
+!installer/test/data/*.vcf

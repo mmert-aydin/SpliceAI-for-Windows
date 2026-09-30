@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below, and cite SpliceAI itself (Jaganathan et al., Cell 2019; see README)."
+type: software
+title: "SpliceAI for Windows (SpliceAI Variant Scoring)"
+version: 1.1.0
+authors:
+  - family-names: "Aydın"
+    given-names: "Mustafa Mert"
+    email: aydinn.mmert@gmail.com
+license: MIT
+repository-code: "https://github.com/mmert-aydin/SpliceAI-for-Windows"
+keywords:
+  - SpliceAI
+  - splicing
+  - variant annotation
+  - VCF
+  - Windows

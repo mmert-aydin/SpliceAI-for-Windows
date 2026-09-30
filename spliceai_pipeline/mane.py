@@ -32,9 +32,6 @@ MANE_CURRENT_DIR_URL = "https://ftp.ncbi.nlm.nih.gov/refseq/MANE/MANE_human/curr
 
 # Default download location: a "mane" folder next to the app (see
 # app_paths.app_root_dir()), which is where the pipeline reads it from.
-#
-# (Original comments weren't recoverable from the compiled program; blank and
-# comment lines like these keep line numbers where they were.)
 DEFAULT_MANE_DIR = os.path.join(app_root_dir(), "mane")
 
 _SUMMARY_FILENAME_RE = re.compile(r"MANE\.GRCh38\.v[\d.]+\.summary\.txt\.gz")

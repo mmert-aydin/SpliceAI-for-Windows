@@ -14,5 +14,5 @@ truststore==0.10.4
 setuptools==80.9.0
 
 # SpliceAI itself is NOT listed on purpose: its license forbids redistribution,
-# so each user installs it themselves (see README.md):
+# so each user installs it themselves (see docs/DEVELOPMENT.md):
 #   pip install --no-deps spliceai==1.3.1
