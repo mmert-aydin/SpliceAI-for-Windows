@@ -13,6 +13,9 @@
 ;   - copies the reference genomes to ~\SpliceAI_reference_data when a
 ;     reference-data folder sits next to Setup.exe (the USB layout), so the
 ;     program finds them by itself and never asks the user for a file.
+;   - copies the reference score databases (spliceai-refdb\hg19, \hg38 next
+;     to Setup.exe) the same way, unless a valid one is already on the PC; an
+;     invalid one there is renamed <build>.invalid-<date> first, never deleted.
 
 #ifndef AppVersion
   #error Run build.ps1 instead of compiling this script directly.
@@ -52,7 +55,10 @@ DisableWelcomePage=no
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
-LicenseFile=terms.txt
+; English or Turkish, English first (the program's default too); the license page and Setup's own texts follow
+; (messages-en.isl, messages-tr.isl, terms-tr.txt).
+ShowLanguageDialog=yes
+LanguageDetectionMethod=none
 SetupIconFile=..\spliceai_gui\assets\logo.ico
 UninstallDisplayIcon={app}\{#AppExe}
 UninstallDisplayName={#AppName}
@@ -69,13 +75,21 @@ LZMANumBlockThreads=4
 ; The SpliceAI package unpacked after the download (~25 MB).
 ExtraDiskSpaceRequired=30000000
 
+[Languages]
+Name: "en"; MessagesFile: "compiler:Default.isl,messages-en.isl"; LicenseFile: "terms.txt"
+Name: "tr"; MessagesFile: "compiler:Languages\Turkish.isl,messages-tr.isl"; LicenseFile: "terms-tr.txt"
+
 [Tasks]
-Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Shortcuts:"
+Name: "desktopicon"; Description: "{cm:TaskDesktopIcon}"; GroupDescription: "{cm:TaskShortcuts}"
 ; Only offered when Setup.exe has a reference-data folder beside it (the USB
 ; layout). Copying the genomes onto the PC is what lets the program find them
 ; by itself afterwards, with the drive unplugged -- see
 ; spliceai_gui/reference_locator.py, which looks here first.
-Name: "referencedata"; Description: "&Copy the reference genomes to this PC (about 6 GB)"; GroupDescription: "Reference genomes:"; Check: ReferenceDataBeside
+Name: "referencedata"; Description: "{cm:TaskGenomes}"; GroupDescription: "{cm:TaskGenomesGroup}"; Check: ReferenceDataBeside
+; The reference score databases (Sequence to cDNA tab), likewise only from the
+; drive. Copied only where no valid database is on the PC (see NeedRefdb).
+Name: "refdbhg19"; Description: "{cm:TaskRefdb19}"; GroupDescription: "{cm:TaskRefdbGroup}"; Check: RefdbBeside('hg19')
+Name: "refdbhg38"; Description: "{cm:TaskRefdb38}"; GroupDescription: "{cm:TaskRefdbGroup}"; Check: RefdbBeside('hg38')
 
 [Files]
 ; The app itself (PyInstaller onedir; SpliceAI is excluded from it).
@@ -96,13 +110,16 @@ Source: "{#ThirdPartyDir}\mane\*"; DestDir: "{app}\mane"; Flags: ignoreversion r
 ; reinstalling doesn't copy 6 GB again; "uninsneveruninstall" because they are
 ; the user's data and are worth keeping for a reinstall.
 Source: "{src}\reference-data\*"; DestDir: "{code:ReferenceDataDir}"; Tasks: referencedata; Flags: external skipifsourcedoesntexist onlyifdoesntexist uninsneveruninstall recursesubdirs createallsubdirs
+; After the app's own files, so NeedRefdb can ask the installed program.
+Source: "{src}\spliceai-refdb\hg19\*"; DestDir: "{code:RefdbDir|hg19}"; Tasks: refdbhg19; Check: NeedRefdb('hg19'); Flags: external skipifsourcedoesntexist ignoreversion uninsneveruninstall
+Source: "{src}\spliceai-refdb\hg38\*"; DestDir: "{code:RefdbDir|hg38}"; Tasks: refdbhg38; Check: NeedRefdb('hg38'); Flags: external skipifsourcedoesntexist ignoreversion uninsneveruninstall
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#AppExe}"; Description: "Start {#AppName} now"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExe}"; Description: "{cm:RunNow,{#AppName}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
 ; Files Setup didn't copy itself: the unpacked SpliceAI package, Python's
@@ -121,6 +138,10 @@ const
 
 var
   DownloadPage: TDownloadWizardPage;
+  { NeedRefdb's answer per build, asked once: '' not yet, 'copy', 'keep'. }
+  RefdbDecision19, RefdbDecision38: String;
+  { Shown on the last page: what happened to each database. }
+  RefdbNotes: String;
   { Verified wheel to unpack after the files are installed; '' = nothing to do. }
   WheelPath: String;
 
@@ -150,6 +171,85 @@ begin
             FileExists(ReferenceDataSrc + '\hg38.fa');
 end;
 
+function RefdbSrc(Build: String): String;
+begin
+  Result := ExpandConstant('{src}\spliceai-refdb\') + Build;
+end;
+
+{ Where the program looks for its databases (spliceai_pipeline/refdb.py,
+  default_root) and where its own Import puts them. }
+function RefdbDir(Build: String): String;
+begin
+  Result := ExpandConstant('{%USERPROFILE}\SpliceAI_reference_data\spliceai-refdb\') + Build;
+end;
+
+function RefdbBeside(Build: String): Boolean;
+begin
+  Result := FileExists(RefdbSrc(Build) + '\manifest.json');
+end;
+
+{ Bytes of the files directly in Folder. }
+function FolderSize(Folder: String): Int64;
+var
+  Rec: TFindRec;
+begin
+  Result := 0;
+  if FindFirst(Folder + '\*', Rec) then
+  try
+    repeat
+      if Rec.Attributes and FILE_ATTRIBUTE_DIRECTORY = 0 then
+        Result := Result + (Int64(Rec.SizeHigh) shl 32) + Rec.SizeLow;
+    until not FindNext(Rec);
+  finally
+    FindClose(Rec);
+  end;
+end;
+
+{ Called by the database [Files] entries, after the program is installed.
+  The program itself says whether the PC already has a usable database
+  (SpliceAI-VariantScoring.exe --check-refdb: 0 valid, 2 none, 1 refused):
+  a valid one is kept, a refused one renamed so nothing is lost, then copied. }
+function NeedRefdb(Build: String): Boolean;
+var
+  Code: Integer;
+  Dest, Moved, Decision: String;
+begin
+  if Build = 'hg19' then Decision := RefdbDecision19 else Decision := RefdbDecision38;
+  if Decision = '' then
+  begin
+    Decision := 'copy';
+    Dest := RefdbDir(Build);
+    if DirExists(Dest) then
+    begin
+      WizardForm.StatusLabel.Caption := FmtMessage(CustomMessage('CheckingRefdb'), [Build]);
+      if not Exec(ExpandConstant('{app}\{#AppExe}'), '--check-refdb "' + Dest + '" ' + Build, '',
+                  SW_HIDE, ewWaitUntilTerminated, Code) then
+        Code := -1;
+      Log(Format('--check-refdb %s %s -> %d', [Dest, Build, Code]));
+      if Code = 0 then
+      begin
+        Decision := 'keep';
+        RefdbNotes := RefdbNotes + FmtMessage(CustomMessage('RefdbKept'), [Build]) + #13#10;
+      end
+      else if Code = 1 then
+      begin
+        Moved := Dest + '.invalid-' + GetDateTimeString('yyyymmdd', #0, #0);
+        if DirExists(Moved) then
+          Moved := Moved + '-' + GetDateTimeString('hhnnss', #0, #0);
+        if RenameFile(Dest, Moved) then
+          RefdbNotes := RefdbNotes + FmtMessage(CustomMessage('RefdbRenamed'), [Build, ExtractFileName(Moved)]) + #13#10
+        else
+        begin
+          Decision := 'keep';
+          RefdbNotes := RefdbNotes + FmtMessage(CustomMessage('RefdbNotRenamed'), [Build]) + #13#10;
+        end;
+      end;
+    end;
+    if Build = 'hg19' then RefdbDecision19 := Decision else RefdbDecision38 := Decision;
+  end;
+  Result := Decision = 'copy';
+end;
+
 function ReferenceDataSize: Int64;
 var
   Rec: TFindRec;
@@ -174,24 +274,25 @@ var
   Needed, FreeBytes, TotalBytes: Int64;
 begin
   Result := True;
-  if not WizardIsTaskSelected('referencedata') then
-    Exit;
-  Needed := ReferenceDataSize;
+  Needed := 0;
+  if WizardIsTaskSelected('referencedata') then
+    Needed := ReferenceDataSize;
+  { Counted in full even if a valid database turns out to be there already. }
+  if WizardIsTaskSelected('refdbhg19') then
+    Needed := Needed + FolderSize(RefdbSrc('hg19'));
+  if WizardIsTaskSelected('refdbhg38') then
+    Needed := Needed + FolderSize(RefdbSrc('hg38'));
   if (Needed = 0) or not GetSpaceOnDisk64(ExpandConstant('{%USERPROFILE}'), FreeBytes, TotalBytes) then
     Exit;
   { A gigabyte over, so Windows isn't left with nothing. }
   if FreeBytes >= Needed + 1073741824 then
     Exit;
-  Result := SuppressibleTaskDialogMsgBox('Not enough free space for the reference genomes',
-    'Copying them needs about ' + IntToStr(Needed div 1073741824) + ' GB, and this drive has ' +
-    IntToStr(FreeBytes div 1073741824) + ' GB free.' + #13#10#13#10 +
-    'You can install without copying them and pick the files from the drive in the program ' +
-    'later (it keeps working only while the drive is plugged in), or free up space and run ' +
-    'Setup again.',
-    mbConfirmation, MB_YESNO, ['&Install without copying', '&Go back'], 0, IDNO) = IDYES;
+  Result := SuppressibleTaskDialogMsgBox(CustomMessage('NoSpaceTitle'),
+    FmtMessage(CustomMessage('NoSpaceText'), [IntToStr(Needed div 1073741824), IntToStr(FreeBytes div 1073741824)]),
+    mbConfirmation, MB_YESNO, [CustomMessage('NoSpaceInstall'), CustomMessage('NoSpaceBack')], 0, IDNO) = IDYES;
   { The leading * keeps the other tasks (the desktop shortcut) as they are. }
   if Result then
-    WizardSelectTasks('*!referencedata');
+    WizardSelectTasks('*!referencedata,*!refdbhg19,*!refdbhg38');
 end;
 
 function SpliceAIPresent: Boolean;
@@ -208,8 +309,8 @@ end;
 
 procedure InitializeWizard;
 begin
-  DownloadPage := CreateDownloadPage('Downloading SpliceAI',
-    'Setup is downloading SpliceAI {#SpliceAIVersion} from pypi.org (about 16 MB).',
+  DownloadPage := CreateDownloadPage(CustomMessage('DownloadTitle'),
+    FmtMessage(CustomMessage('DownloadText'), ['{#SpliceAIVersion}']),
     @OnDownloadProgress);
   DownloadPage.ShowBaseNameInsteadOfUrl := True;
 end;
@@ -252,13 +353,9 @@ begin
       DownloadPage.Hide;
     end;
 
-    case SuppressibleTaskDialogMsgBox('SpliceAI could not be downloaded',
-        'Setup needs an internet connection once to download SpliceAI.' + #13#10#13#10 +
-        'Details: ' + Msg + #13#10#13#10 +
-        'Check that this computer is connected to the internet and try again. ' +
-        'If you continue without it, everything else is installed and the program ' +
-        'will offer to download SpliceAI when it starts.',
-        mbError, MB_YESNO, ['&Try again', '&Continue without SpliceAI'], 0, IDNO) of
+    case SuppressibleTaskDialogMsgBox(CustomMessage('DownloadFailedTitle'),
+        FmtMessage(CustomMessage('DownloadFailedText'), [Msg]),
+        mbError, MB_YESNO, [CustomMessage('DownloadRetry'), CustomMessage('DownloadSkip')], 0, IDNO) of
       IDYES: ;  { loop and retry }
     else
       Exit;
@@ -311,12 +408,33 @@ begin
         '-LiteralPath ''' + ZipCopy + ''' -DestinationPath ''' + InternalDir + '''"');
   end;
   if not SpliceAIPresent then
-    SuppressibleMsgBox('SpliceAI was downloaded but could not be unpacked. ' +
-      'The program will offer to install it when it starts.', mbError, MB_OK, IDOK);
+    SuppressibleMsgBox(CustomMessage('UnpackFailed'), mbError, MB_OK, IDOK);
+end;
+
+{ Setup run in Turkish on a PC where the program has never run: the program starts in Turkish too (its settings
+  file, spliceai_gui/config.py; an existing one is never touched). }
+procedure PresetLanguage;
+var
+  Folder: String;
+begin
+  Folder := ExpandConstant('{%USERPROFILE}\.spliceai_gui');
+  if (ActiveLanguage <> 'tr') or FileExists(Folder + '\config.json') then
+    Exit;
+  ForceDirectories(Folder);
+  SaveStringToFile(Folder + '\config.json', '{"language": "tr"}', False);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if (CurStep = ssPostInstall) and (WheelPath <> '') then
     UnpackWheel;
+  if CurStep = ssPostInstall then
+    PresetLanguage;
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if (CurPageID = wpFinished) and (RefdbNotes <> '') then
+    WizardForm.FinishedLabel.Caption := WizardForm.FinishedLabel.Caption + #13#10#13#10 +
+      CustomMessage('RefdbNotesTitle') + #13#10 + RefdbNotes;
 end;

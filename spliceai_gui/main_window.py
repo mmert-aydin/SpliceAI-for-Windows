@@ -3,24 +3,27 @@ around the existing spliceai_pipeline package. No pipeline logic lives here --
 only UI state and calls into spliceai_pipeline.cli.run_pipeline_core (via
 worker.PipelineWorker) and spliceai_pipeline.writer.write_rows_ordered (for export).
 """
+import concurrent.futures
 import gzip
 import os
 import tempfile
 import time
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame,
     QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QPlainTextEdit,
-    QProgressBar, QPushButton, QRadioButton, QScrollArea, QSplitter, QStyle, QTableView, QToolButton,
+    QProgressBar, QPushButton, QRadioButton, QScrollArea, QSplitter, QStyle, QTableView, QTabWidget, QToolButton,
     QVBoxLayout, QWidget,
 )
 
+from spliceai_pipeline import haplotype, refdb, vcf_bridge
 from spliceai_pipeline.cli import BUILDS, MODES, format_elapsed
 from spliceai_pipeline.mane import (
     DEFAULT_MANE_DIR, find_cached_summary, is_summary_filename, sibling_mane_dir,
 )
+from spliceai_pipeline.normalize import normalize_variant
 from spliceai_pipeline.snpeff import (
     DEFAULT_SNPEFF_DIR, JavaNotFoundError, SnpEffNotSetUpError, check_snpeff_setup, find_java, snpeff_jar_path,
 )
@@ -31,25 +34,27 @@ from . import config
 from . import spliceai_setup
 from . import theme
 from .assets_paths import LOGO_PNG
+from .cdna_tab import CdnaTab
 from .cpu_meter import CpuMeter
 from .download_dialog import ReferenceDownloadDialog
 from .gene_import_dialog import GeneImportDialog
+from .help_button import make_help_button
 from .mane_download_dialog import ManeDownloadDialog
 from . import reference_locator
-from .reference_download import REFERENCE_URLS
+from .i18n import LANGUAGES, language, t
+from .refdb_wizard import RefdbDialog, RefdbManager, database_folder_of, describe as describe_refdb, live_seconds
 from .snpeff_download_dialog import SnpEffDownloadDialog
 from .spliceai_setup_dialog import SpliceAISetupDialog
 from .score_delegate import THRESHOLDS as SCORE_THRESHOLDS
 from .score_delegate import ScoreBarDelegate, SeverityStripeDelegate
 from .table_model import COLUMNS, MAX_SCORE_COLUMN, ScoreFilterProxyModel, ScoreTableModel, sort_key_value
+from .transcript_effect_dialog import TranscriptEffectDialog
 from .vcf_check import check_vcf_text
 from .vcf_info import detect_vcf_build, summarize_vcf_text
 from .worker import PipelineWorker
 
-ABOUT_DIALOG_LOGO_SIZE = 72
-
 # Shown in front of the progress text while a run is paused.
-PAUSED_PREFIX = "⏸ Paused -- "
+PAUSED_PREFIX = t("⏸ Paused -- ")
 
 # The filter buttons above the results and the colour bands in the table are
 # the same three SpliceAI cutoffs, taken from one place so they can't drift
@@ -70,197 +75,144 @@ RESULTS_PAGE_SIZE = 100
 
 
 MODE_HELP_TEXT = (
-    "raw: the model's unfiltered delta scores.\n\n"
-    "masked: zeroes out predictions that don't align with an annotated splice boundary in the "
-    "expected direction, to suppress biologically implausible predictions. Masked scores are "
-    "always <= raw for the same variant, never higher."
-)
-
-ABOUT_HELP_TEXT = (
-    "This tool scores genetic variants for their predicted effect on RNA "
-    "splicing, using SpliceAI.\n\n"
-    "VCF (Variant Call File) is the standard format for reporting genetic "
-    "variants found in a sample -- one line per variant, with its chromosome, "
-    "position, and reference/alternate alleles. That's the input this program "
-    "needs.\n\n"
-    "SpliceAI is a deep-learning model that predicts whether a variant disrupts "
-    "normal RNA splicing -- the process that removes introns and joins exons "
-    "together. Splicing disruption can cause disease even for variants far from "
-    "classic protein-coding mutations, e.g. deep intronic or synonymous variants "
-    "that create or destroy a splice site.\n\n"
-    "Precomputed data: the original SpliceAI authors published genome-wide score "
-    "files covering most common variants. Using them avoids re-running the slow "
-    "neural network on variants someone has already scored. They're optional -- "
-    "the tool works without them, just slower, since every variant then needs "
-    "live scoring.\n\n"
-    "Reference FASTA is always required, even with precomputed data selected: any "
-    "variant NOT found in the precomputed set still needs live scoring, and live "
-    "scoring needs the actual reference sequence around that variant to build its "
-    "input. There's no way to get full coverage without it.\n\n"
-    "Build (hg19/hg38) must match whatever reference genome your VCF was actually "
-    "called against -- mixing builds silently gives wrong positions and wrong "
-    "scores. Mode (raw/masked) affects how conservative the interpretation is -- "
-    "see the (?) next to Mode for details."
+    t("raw: the model's unfiltered delta scores.\n"
+      "\n"
+      "masked: predictions that do not match an annotated splice boundary in the expected direction are set to "
+      "zero, to suppress biologically implausible predictions. For the same variant, masked scores are never "
+      "higher than raw scores.")
 )
 
 SCORE_HELP_TEXT = (
-    "Column abbreviations:\n"
-    "  • DS = Delta Score -- the model's predicted probability (0-1) that this "
-    "variant creates or disrupts a splice site of the given type\n"
-    "  • DP = Delta Position -- how many base pairs away from the variant the "
-    "predicted splicing change occurs (negative or positive, indicating "
-    "direction relative to the variant)\n"
-    "  • AG = Acceptor Gain -- a new splice acceptor site is predicted to "
-    "form\n"
-    "  • AL = Acceptor Loss -- an existing splice acceptor site is predicted "
-    "to be disrupted\n"
-    "  • DG = Donor Gain -- a new splice donor site is predicted to form\n"
-    "  • DL = Donor Loss -- an existing splice donor site is predicted to be "
-    "disrupted\n\n"
-    "Combined, these give the four score/position column pairs:\n"
-    "  • DS_AG / DP_AG -- score and position for Acceptor Gain\n"
-    "  • DS_AL / DP_AL -- score and position for Acceptor Loss\n"
-    "  • DS_DG / DP_DG -- score and position for Donor Gain\n"
-    "  • DS_DL / DP_DL -- score and position for Donor Loss\n\n"
-    "max_score is simply the largest of those four -- one number summarizing "
-    '"how likely is this variant to disrupt splicing at all."\n\n'
-    "Rough interpretation bands used in practice (these are conventions, not a "
-    "diagnosis): SpliceAI's original paper (Jaganathan et al. 2018, Cell) and "
-    "many clinical labs commonly use ~0.2 as a sensitivity-favoring cutoff, "
-    "~0.5 as a more standard threshold, and ~0.8 as high-confidence.\n\n"
-    "A high score indicates a predicted splicing effect -- it is NOT clinical "
-    "pathogenicity by itself. Proper variant interpretation still requires "
-    "ACMG criteria, clinical correlation, and other supporting evidence.\n\n"
-    "Allele Fraction: read directly from the input VCF's AF field (checking "
-    "both INFO and FORMAT/sample level -- FORMAT is preferred when both are "
-    "present, since it's the actual per-sample measured value rather than a "
-    "potentially cohort-level INFO annotation). If the VCF has no AF at all, "
-    "it's computed instead from AD (allelic depth) as alt / (ref + alt), when "
-    "AD is present. Left blank if the VCF has neither -- not every caller "
-    "reports either field, and this is never required for scoring itself."
+    t("Column abbreviations:\n"
+      "  • DS = Delta Score: the predicted probability (0-1) that the variant creates or disrupts a splice site of "
+      "the given type\n"
+      "  • DP = Delta Position: the distance in base pairs between the variant and the predicted splicing change "
+      "(negative or positive, indicating the direction)\n"
+      "  • AG = Acceptor Gain: a new splice acceptor site is predicted\n"
+      "  • AL = Acceptor Loss: the loss of an existing splice acceptor site is predicted\n"
+      "  • DG = Donor Gain: a new splice donor site is predicted\n"
+      "  • DL = Donor Loss: the loss of an existing splice donor site is predicted\n"
+      "\n"
+      "Together these form four score/position column pairs: DS_AG / DP_AG, DS_AL / DP_AL, DS_DG / DP_DG and DS_DL "
+      "/ DP_DL.\n"
+      "\n"
+      "max_score is the largest of the four scores and summarises the overall likelihood that the variant affects "
+      "splicing.\n"
+      "\n"
+      "Commonly used interpretation thresholds (conventions, not diagnostic criteria): the original SpliceAI "
+      "publication (Jaganathan et al., Cell 2019) and many laboratories use about 0.2 as a sensitive cut-off, "
+      "about 0.5 as a standard threshold and about 0.8 as a high-confidence threshold.\n"
+      "\n"
+      "A high score indicates a predicted splicing effect; it does not by itself establish clinical pathogenicity. "
+      "Variant interpretation also requires the ACMG criteria, clinical correlation and other supporting "
+      "evidence.\n"
+      "\n"
+      "Allele Fraction is read from the VCF's AF field (the per-sample FORMAT value is preferred to the INFO "
+      "value). If there is no AF, it is calculated from AD as alt / (ref + alt); if neither is present, the column "
+      "is left blank. It is not needed for scoring.")
 )
 
 PRECOMPUTED_HELP_TEXT = (
-    "What it is: genome-wide SpliceAI scores precomputed by the original authors "
-    "(Jaganathan et al. 2018, Cell) for every possible SNV and common indel (1bp "
-    "insertions, 1-4bp deletions) across the whole genome -- for both hg19 and hg38, "
-    "in both raw and masked modes. Most variants you'll ever score are already in "
-    "there.\n\n"
-    "Why use it: it makes this tool dramatically faster, since only variants NOT "
-    'already covered get sent through the slow live-scoring step. "I don\'t have '
-    'precomputed data" still works correctly -- every variant just gets live-scored '
-    "instead, which is slower but gives identical results.\n\n"
-    "Where to get it: the official source is Illumina BaseSpace, linked from the "
-    "SpliceAI GitHub repo's own data-availability section -- "
-    "basespace.illumina.com/s/otSPW8hnhaZR. It's a large multi-GB download per file.\n"
-    "\n"
-    "What to look for: per build (hg19/hg38) and mode (raw/masked), a pair of files -- "
-    "one for SNVs, one for indels -- named like "
-    "spliceai_scores.{raw,masked}.{snv,indel}.hg{19,38}.vcf.gz, each as a bgzipped VCF "
-    "with a matching .tbi index sitting alongside it.\n\n"
-    "How to point the tool at it: keep the files bgzip+tabix as downloaded -- do NOT "
-    "decompress them to plain .vcf, since that discards the .tbi index this tool needs "
-    "for fast lookups (it would otherwise have to scan the entire multi-GB file for "
-    'every variant). Once downloaded, select "Use precomputed data" and browse to the '
-    "folder containing all the files."
+    t('The SpliceAI authors (Jaganathan et al., Cell 2019) have precomputed scores for every possible singl'
+      'e-nucleotide variant and for common small indels (1 bp insertions, 1-4 bp deletions). These files ar'
+      'e optional and can be downloaded from Illumina BaseSpace (basespace.illumina.com/s/otSPW8hnhaZR) und'
+      "er Illumina's terms. Scores are available for hg19 and hg38, in raw and masked mode; for one build, "
+      'the masked SNV file is about 29 GB and the masked indel file about 69 GB.\n\nWhen the program can read'
+      ' these files, variants already in them are not scored again: their scores are taken from the files, '
+      'which shortens the run. Without them ("I don\'t have precomputed data") every variant is scored live;'
+      ' this takes longer, but the results are the same.\n\nFile names: spliceai_scores.{raw,masked}.{snv,ind'
+      'el}.hg{19,38}.vcf.gz, each with its .tbi index. Keep the files compressed as downloaded (bgzip, with'
+      ' the .tbi index); do not decompress them. Then select "Use precomputed data" and choose the folder t'
+      'hat contains them.')
+)
+
+SCORE_GENES_HELP_TEXT = (
+    t("Scores only the variants within the selected genes, so a whole genome or exome takes minutes instead of "
+      "hours. A variant is considered to lie within a gene when it falls in SpliceAI's interval for that gene (the "
+      "same rule that assigns a score to a gene), and only rows for those genes are kept.\n"
+      "\n"
+      "Run is enabled once one of the two is chosen: All genes scores every variant; Choose gene list... accepts "
+      "a pasted list (for example an HPO phenotype list or a gene panel) and can save it under a name for later "
+      "use. The last list is offered again.\n"
+      "\n"
+      "This differs from the gene-set filter above the results table, which only hides rows of a run in which all "
+      "variants were scored.")
 )
 
 COMPAT_HELP_TEXT = (
-    '"Check compatibility" runs a fast structural check on whatever VCF text is '
-    "currently loaded or pasted -- without running the actual scoring pipeline -- so "
-    "you get a quick sanity check before committing to a run that might take a while.\n"
-    "\n"
-    "What it verifies:\n"
-    "  • A #CHROM header line is present with the required columns (#CHROM, POS, ID, "
-    "REF, ALT)\n"
-    "  • At least one variant record follows the header\n"
-    "  • A sample of records parse correctly -- POS is a positive integer, REF uses "
-    "valid base characters, ALT is non-empty\n\n"
-    "It also reports how many variant records were found and whether chromosome names "
-    'are "chr"-prefixed or bare -- useful context, not itself a pass/fail signal.\n\n'
-    "Rough orientation for variant counts (actual numbers vary a lot by lab, capture "
-    "kit, and filtering -- treat these as loose sanity ranges, not precise "
-    "thresholds):\n"
-    "  • WES (whole exome): roughly tens of thousands of variants\n"
-    "  • WGS (whole genome): roughly several million variants\n"
-    "  • CES / clinical exome or gene panels: typically much smaller, hundreds to low "
-    "thousands, since they target a specific gene panel"
+    t("\"Check compatibility\" performs a quick structural check of the VCF text currently loaded or pasted, "
+      "without running the scoring, so that problems can be found before a potentially long run.\n"
+      "\n"
+      "It verifies that:\n"
+      "  • a #CHROM header line with the required columns (#CHROM, POS, ID, REF, ALT) is present\n"
+      "  • at least one variant record follows the header\n"
+      "  • a sample of records can be parsed: POS is a positive integer, REF contains valid bases and ALT is not "
+      "empty\n"
+      "\n"
+      "It also reports the number of variant records and whether the chromosome names carry the \"chr\" prefix.\n"
+      "\n"
+      "Typical variant counts (these vary considerably between laboratories, capture kits and filtering):\n"
+      "  • WES (whole exome): tens of thousands\n"
+      "  • WGS (whole genome): several million\n"
+      "  • CES / clinical exome or gene panels: from hundreds to a few thousand")
 )
 
-FASTA_HELP_TEXT = (
-    "There's one field per genome build. A run uses the one for the build selected above, which "
-    "is picked automatically from the VCF's own header whenever it says (##reference, or chr1's "
-    "length in its ##contig lines). Set the build(s) you work with.\n\n"
-    'Easiest: click "Download..." next to a field. It fetches that build\'s FASTA '
-    "directly from UCSC's official goldenPath, decompresses it, and builds its "
-    ".fai index automatically -- no samtools required. Needs a decent connection: ~1 GB compressed ("
-    f"{REFERENCE_URLS['hg19']}), ~3 GB once decompressed.\n\n"
-    "Manual alternative: download hg19.fa.gz / hg38.fa.gz yourself from "
-    "hgdownload.soe.ucsc.edu/goldenPath/{build}/bigZips/, decompress it (gunzip), and "
-    "build a .fai index alongside it -- with `samtools faidx` if you have it, or in "
-    "Python with pyfaidx (`Fasta(path, rebuild=True)`) if you don't. Then Browse to the "
-    "decompressed .fa file here.\n\n"
-    'Why it\'s required even with precomputed data selected: see the "About this '
-    'program" (?) at the top -- any variant not already covered by the precomputed set '
-    "still needs live scoring, which needs the actual reference sequence around that "
-    "variant."
+FASTA_HELP_TEXT = t(
+    "There is one field per genome build. A run uses the field for the build selected above, which is detected "
+    "automatically from the VCF header when the header states it (##reference, or the length of chr1 in its "
+    "##contig lines).\n"
+    "\n"
+    "The simplest option is \"Download...\" next to a field: it downloads the build's FASTA from UCSC (about 1 "
+    "GB compressed, about 3 GB decompressed), decompresses it and creates its .fai index.\n"
+    "\n"
+    "Alternatively, download hg19.fa.gz or hg38.fa.gz from hgdownload.soe.ucsc.edu/goldenPath/{build}/bigZips/, "
+    "decompress it, create a .fai index (for example with `samtools faidx`), and select the .fa file with "
+    "Browse.\n"
+    "\n"
+    "The reference FASTA is required even when precomputed data are selected, because variants not covered by "
+    "them are scored live using the reference sequence."
 )
 
 SNPEFF_HELP_TEXT = (
-    'Checking "I will use SnpEff" turns on transcript/coding-position annotation (see the '
-    'neighboring "About SnpEff" (?) for what that means and why). It\'s a separate Java tool, '
-    "not part of this Python program, so it isn't bundled with the app.\n\n"
-    "One-time setup:\n"
-    "  Click \"Download SnpEff...\" below -- that's all. It downloads SnpEff itself and the correct "
-    "RefSeq-transcript database for your selected build (GRCh37.p13/GRCh38.p14, which give NM_ "
-    "IDs, unlike the more commonly-referenced Ensembl GRCh3x.NN databases), same progress-bar "
-    'mechanic as "Download reference..." for the FASTA.\n'
-    "  SnpEff runs on Java 21 or newer. If this PC doesn't have that, the same download also "
-    "fetches a private copy of Java (Eclipse Temurin, ~50 MB) into the app's \"java\" folder, used "
-    "only by this app -- nothing to install by hand, and an older Java already on the PC is left "
-    "alone.\n\n"
-    "Once set up, Run works exactly as before, just with two more columns filled in. Leaving "
-    "the checkbox unchecked skips this entirely -- SnpEff is optional, unlike the reference "
-    "FASTA."
+    t("SnpEff adds transcript and coding-position annotation (see \"About SnpEff\" (?)). SnpEff "
+      "is a separate Java program, not part of this Python program.\n"
+      "\n"
+      "One-time setup, if needed:\n"
+      "  \"Download SnpEff...\" below downloads SnpEff and the RefSeq transcript database for the selected build "
+      "(GRCh37.p13/GRCh38.p14, which provide NM_ identifiers), with a progress bar as for the reference FASTA.\n"
+      "  SnpEff requires Java 21 or later. If this computer does not have it, the same download also obtains a "
+      "private copy of Java (Eclipse Temurin, about 50 MB) in the program's \"java\" folder, used only by this "
+      "program; any Java already installed is left unchanged.\n"
+      "\n"
+      "Once set up, Run fills in two additional columns.")
 )
 
 SNPEFF_ABOUT_HELP_TEXT = (
-    "SnpEff is an open-source variant annotation tool that figures out which "
-    "gene and transcript a variant falls in, and translates its genomic position "
-    "into coding-sequence notation (e.g. NM_018136.5, c.875A>T).\n\n"
-    "When a variant overlaps more than one annotated transcript, the one shown "
-    "is chosen by preference, not arbitrarily: NCBI's MANE Select transcript for "
-    "that gene if one is annotated here (matched by RefSeq accession, "
-    "independent of hg19 vs hg38 -- MANE Select names a specific transcript, not "
-    "a genome-build coordinate); otherwise any curated RefSeq transcript "
-    "(NM_/NR_) over a computationally predicted one (XM_/XR_); otherwise "
-    "whichever SnpEff lists first.\n\n"
-    "SpliceAI predicts whether a variant disrupts splicing, but has no concept "
-    "of transcripts or coding notation on its own -- SnpEff fills that gap, so "
-    "each row shows both the splicing prediction and the standard "
-    "transcript/coding notation a clinician or researcher would actually "
-    "reference.\n\n"
-    "SnpEff is open source under the MIT license, credit to its original author "
-    "Pablo Cingolani -- a much less restrictive license than SpliceAI's, "
-    "mentioned here for the same transparency reason as the other credits in "
-    "this program.\n\n"
-    "Requires a one-time download (Java + a gene-annotation database for your "
-    'build) -- same idea as the reference FASTA. See the neighboring "SnpEff '
-    'setup" (?) for exact setup steps.'
+    t("SnpEff is an open-source variant annotation tool that determines the gene and transcript in which a variant "
+      "lies and converts its genomic position into coding-sequence notation (e.g. NM_018136.5, c.875A>T).\n"
+      "\n"
+      "When a variant overlaps more than one transcript, the transcript shown is chosen in this order: the gene's "
+      "NCBI MANE Select transcript, if available (matched by RefSeq accession, independent of the genome build); "
+      "otherwise a curated RefSeq transcript (NM_/NR_) in preference to a computationally predicted one (XM_/XR_); "
+      "otherwise the first transcript listed by SnpEff.\n"
+      "\n"
+      "SpliceAI predicts effects on splicing but does not provide transcript or coding notation; SnpEff "
+      "complements it, so that each row shows both the splicing prediction and the standard transcript and coding "
+      "notation.\n"
+      "\n"
+      "SnpEff is open source under the MIT license and was developed by Pablo Cingolani.")
 )
 
 MANE_HELP_TEXT = (
-    "NCBI's MANE Select is one expert-curated, representative transcript per gene, "
-    "agreed upon by NCBI and Ensembl. When a variant overlaps more than one "
-    "transcript, this is used to prefer that one over an arbitrary or computationally "
-    "predicted transcript when SnpEff reports the transcript/coding-position columns.\n"
-    "\n"
-    "Entirely optional -- without it, transcript selection still works, just falling "
-    "back to preferring any curated RefSeq transcript (NM_/NR_) over a predicted one "
-    "(XM_/XR_), or whichever SnpEff lists first if neither preference applies.\n\n"
-    "Small download (~1 MB) from NCBI's own FTP site; the exact current-version "
-    "filename is looked up automatically rather than hardcoded, so this always fetches "
-    "the latest release."
+    t("NCBI's MANE Select is a single, expert-curated representative transcript per gene, agreed by NCBI and "
+      "Ensembl. When a variant overlaps more than one transcript, SnpEff's transcript and coding-position columns "
+      "report this transcript in preference to the others.\n"
+      "\n"
+      "It is optional: without it, a curated RefSeq transcript (NM_/NR_) is preferred to a predicted one "
+      "(XM_/XR_), and otherwise the first transcript listed by SnpEff is used.\n"
+      "\n"
+      "The file is small (about 1 MB) and is downloaded from NCBI's FTP site; the latest release is located "
+      "automatically.")
 )
 
 
@@ -404,7 +356,7 @@ class PathLineEdit(QLineEdit):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("SpliceAI Variant Scoring")
+        self.setWindowTitle(t("SpliceAI Variant Scoring"))
         self.resize(1200, 800)
         # Start no bigger than the screen; on a small one everything scrolls
         # (see _build_ui).
@@ -437,6 +389,11 @@ class MainWindow(QMainWindow):
         self._last_run_settings = None
         self._last_run_duration = None
 
+        # The reference score database and its builds (refdb_wizard.py): its
+        # status shows in the top bar; a build left unfinished continues now.
+        self.refdb = RefdbManager(lambda build: self.fasta_edits[build].text().strip(), self._mane_dir, self)
+        self._refdb_notices = []
+
         self._build_ui()
         # Files can be dragged onto the whole window, not just the input box
         # (see dropEvent).
@@ -445,6 +402,10 @@ class MainWindow(QMainWindow):
         self._init_advanced_section()
         self._update_precomputed_enabled()
         self._update_run_enabled()
+        self.refdb.changed.connect(self._update_refdb_indicator)
+        self.refdb.notice.connect(self._show_refdb_notice)
+        self.refdb.refresh()
+        self.refdb.start_next()
 
     def _build_ui(self):
         # Everything sits in one scroll area, so the window still works on a
@@ -483,7 +444,13 @@ class MainWindow(QMainWindow):
         self.panes.setStretchFactor(1, 0)
         self.panes.setStretchFactor(2, 0)
         self.panes.setSizes(DEFAULT_PANE_SIZES)
-        root.addWidget(self.panes, stretch=1)
+        # Two tabs: VCF scoring, exactly the page it always was, and Sequence to
+        # cDNA (cdna_tab.py). The top bar above them belongs to both.
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self.panes, t("VCF scoring"))
+        self.cdna_tab = CdnaTab(self)
+        self.tabs.addTab(self.cdna_tab, t("Sequence to cDNA"))
+        root.addWidget(self.tabs, stretch=1)
 
         # The results table keeps a usable height; when space runs out the
         # page scrolls rather than shrinking it to a few rows.
@@ -496,47 +463,12 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(scroll)
 
     def _make_help_button(self, dialog_title, help_text, font_size="10pt", logo=False):
-        """A small clickable "(?)" icon that pops up an explanation on click --
-        same pattern everywhere (Mode, About, score interpretation), on purpose:
-        a hover-only tooltip alone was tried first for the Mode icon and turned
-        out to be unreliable, so every help icon here has a real clicked handler.
-
-        logo=True (used only for the About dialog) shows the app logo at the top
-        of the popup via QMessageBox.setIconPixmap() instead of the plain
-        QMessageBox.information() convenience call the other help icons use."""
-        button = QToolButton()
-        button.setText("(?)")
-        button.setAutoRaise(True)
-        button.setCursor(Qt.PointingHandCursor)
-        button.setStyleSheet(
-            f"QToolButton {{ color: palette(link); font-weight: bold; font-size: {font_size}; border: none; }}"
-        )
-        button.setToolTip(help_text)
-
-        if logo:
-            button.clicked.connect(lambda: self._show_help_with_logo(dialog_title, help_text))
-        else:
-            button.clicked.connect(lambda: QMessageBox.information(self, dialog_title, help_text))
-        return button
-
-    def _show_help_with_logo(self, dialog_title, help_text):
-        box = QMessageBox(self)
-        box.setWindowTitle(dialog_title)
-        box.setText(help_text)
-        box.setStandardButtons(QMessageBox.Ok)
-        if LOGO_PNG.exists():
-            pixmap = QPixmap(str(LOGO_PNG)).scaled(
-                ABOUT_DIALOG_LOGO_SIZE, ABOUT_DIALOG_LOGO_SIZE,
-                Qt.KeepAspectRatio, Qt.SmoothTransformation,
-            )
-            box.setIconPixmap(pixmap)
-        else:
-            box.setIcon(QMessageBox.Information)
-        box.exec()
+        """A "(?)" icon that pops up an explanation (help_button.py, shared with the other tab)."""
+        return make_help_button(self, dialog_title, help_text, font_size, logo)
 
     def _build_top_bar(self):
         row = QHBoxLayout()
-        title = QLabel("SpliceAI Variant Scoring")
+        title = QLabel(t("SpliceAI Variant Scoring"))
         title.setStyleSheet(f"font-size: 16pt; font-weight: 600; color: {theme.INK};")
         row.addWidget(title)
         row.addStretch(1)
@@ -549,25 +481,79 @@ class MainWindow(QMainWindow):
         self.spliceai_status_button.clicked.connect(self._on_spliceai_status_clicked)
         row.addWidget(self.spliceai_status_button)
         self._update_spliceai_status_indicator()
-        self.about_help_button = self._make_help_button(
-            "About this program", ABOUT_HELP_TEXT, font_size="16pt", logo=True,
-        )
-        row.addWidget(self.about_help_button)
+        self.refdb_status_button = QPushButton()
+        self.refdb_status_button.setCursor(Qt.PointingHandCursor)
+        self.refdb_status_button.clicked.connect(lambda: self._open_refdb_dialog())
+        row.addWidget(self.refdb_status_button)
+        self._update_refdb_indicator()
+        # English / Türkçe (i18n.py): takes effect at the next start, so the notice says it in both.
+        self.language_combo = QComboBox()
+        for code, name in LANGUAGES.items():
+            self.language_combo.addItem(name, code)
+        self.language_combo.setCurrentIndex(list(LANGUAGES).index(language()))
+        self.language_combo.setToolTip("Language / Dil")
+        self.language_combo.currentIndexChanged.connect(self._on_language_changed)
+        row.addWidget(self.language_combo)
         return row
+
+    def _on_language_changed(self):
+        settings = config.load()
+        settings["language"] = self.language_combo.currentData()
+        config.save(settings)
+        QMessageBox.information(self, "Language / Dil", "The language changes the next time the program starts.\n\n"
+                                "Dil, program bir sonraki açılışında değişir.")
 
     def _update_spliceai_status_indicator(self):
         """Always shown: green when SpliceAI is found (click to check it), red
         when it isn't (click to install it)."""
         if spliceai_setup.is_spliceai_installed():
-            text, kind = "SpliceAI ready", "ok"
-            tip = "SpliceAI is installed. Click to see its version and location, and whether all its files are there."
+            text, kind = t("SpliceAI ready"), "ok"
+            tip = t("SpliceAI is installed. Click to see its version and location, and whether all its files are there.")
         else:
-            text, kind = "SpliceAI not installed", "crit"
-            tip = "Live scoring can't run without it. Click to install SpliceAI."
+            text, kind = t("SpliceAI not installed"), "crit"
+            tip = t("Live scoring can't run without it. Click to install SpliceAI.")
         self.spliceai_status_button.setText(text)
         self.spliceai_status_button.setToolTip(tip)
         self.spliceai_status_button.setStyleSheet(theme.pill(kind))
         self.spliceai_status_button.setVisible(True)
+
+    def _update_refdb_indicator(self):
+        """The reference score database's state, for the Sequence-to-cDNA work
+        (the VCF tab doesn't need it): building, ready for which builds, a
+        problem, or none yet. Click for details, the build and import."""
+        m = self.refdb
+        usable = [b for b in m.status if m.usable(b)]
+        if m.proc is not None:
+            p = m.progress
+            pct = f" {100 * p['bases_done'] / p['bases_total']:.0f}%" if p.get("bases_total") else ""
+            text, kind = t("Building reference DB") + pct + (t(" (paused)") if p.get("state") == "paused" else ""), "warn"
+        elif any(s["state"] == "refused" for s in m.status.values()) or m.errors:
+            text, kind = t("Reference DB: problem"), "warn"
+        elif usable:
+            text, kind = t("Reference DB: {builds}", builds=", ".join(usable)), "ok"
+        elif any(s["state"] == "checking" for s in m.status.values()):
+            text, kind = t("Reference DB: checking..."), "muted"
+        else:
+            text, kind = t("No reference DB"), "muted"
+        self.refdb_status_button.setText(text)
+        self.refdb_status_button.setStyleSheet(theme.pill(kind))
+        self.refdb_status_button.setToolTip(
+            "\n".join(describe_refdb(s) for s in m.status.values()) + "\n\n"
+            + t("Click for details, to build it or import one."))
+
+    def _open_refdb_dialog(self, import_folder=None):
+        dialog = RefdbDialog(self.refdb, self)
+        if import_folder:
+            dialog.import_folder(import_folder)
+        dialog.exec()
+
+    def _show_refdb_notice(self, title, text):
+        # Not modal: a build can end while the user is busy with something else.
+        box = QMessageBox(QMessageBox.Information, title, text, QMessageBox.Ok, self)
+        box.setModal(False)
+        box.show()
+        self._refdb_notices.append(box)
+        box.finished.connect(lambda _r, b=box: self._refdb_notices.remove(b))
 
     def _on_spliceai_status_clicked(self):
         if spliceai_setup.is_spliceai_installed():
@@ -584,25 +570,28 @@ class MainWindow(QMainWindow):
         models_found = info["n_models"] - len(info["missing_models"])
         annotations_found = info["n_annotations"] - len(info["missing_annotations"])
         lines = [
-            f"SpliceAI {info['version'] or '(version unknown)'} -- {info['origin']}.",
+            f"SpliceAI {info['version'] or t('(version unknown)')} -- {t(info['origin'])}.",
             "",
-            f"Location: {info['location']}",
-            f"Model files (spliceai1-5.h5): {models_found} of {info['n_models']} found",
-            f"Gene annotation files (grch37, grch38): {annotations_found} of {info['n_annotations']} found",
+            t("Location: {path}", path=info["location"]),
+            t("Model files (spliceai1-5.h5): {found} of {n} found", found=models_found, n=info["n_models"]),
+            t("Gene annotation files (grch37, grch38): {found} of {n} found", found=annotations_found,
+              n=info["n_annotations"]),
             "",
         ]
         box = QMessageBox(self)
-        box.setWindowTitle("SpliceAI check")
+        box.setWindowTitle(t("SpliceAI check"))
         missing = info["missing_models"] + info["missing_annotations"]
         if missing:
             box.setIcon(QMessageBox.Warning)
-            lines.append(f"⚠ Missing: {', '.join(missing)}. Live scoring won't work until SpliceAI is reinstalled.")
-            reinstall = box.addButton("Open SpliceAI setup...", QMessageBox.ActionRole)
+            lines.append("⚠ " + t("Missing: {files}. Live scoring won't work until SpliceAI is reinstalled.",
+                                  files=", ".join(missing)))
+            reinstall = box.addButton(t("Open SpliceAI setup..."), QMessageBox.ActionRole)
         else:
             box.setIcon(QMessageBox.Information)
-            lines.append("✓ Everything live scoring needs is in place.")
+            lines.append("✓ " + t("Everything live scoring needs is in place."))
             if info["version"] and info["version"] != spliceai_setup.SPLICEAI_VERSION:
-                lines.append(f"(This program is tested with SpliceAI {spliceai_setup.SPLICEAI_VERSION}.)")
+                lines.append(t("(This program is tested with SpliceAI {version}.)",
+                               version=spliceai_setup.SPLICEAI_VERSION))
             reinstall = None
         box.setText("\n".join(lines))
         box.addButton(QMessageBox.Ok)
@@ -611,12 +600,12 @@ class MainWindow(QMainWindow):
             SpliceAISetupDialog(self).exec()
 
     def _build_input_group(self):
-        group = QGroupBox("Input VCF")
+        group = QGroupBox(t("Input VCF"))
         layout = QVBoxLayout(group)
 
         self.vcf_text = VcfDropTextEdit()
         self.vcf_text.setPlaceholderText(
-            'Paste VCF content here, use "Load file..." below, or drag a .vcf / .vcf.gz file anywhere onto this window.'
+            t('Paste VCF content here, use "Load file..." below, or drag a .vcf / .vcf.gz file anywhere onto this window.')
         )
         # A few lines is enough: a loaded VCF is read from its file, not from
         # what is on show here, so this box only has to prove the right file
@@ -628,8 +617,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.vcf_text)
 
         row = QHBoxLayout()
-        load_btn = QPushButton("Load file...")
-        load_btn.setToolTip("Open a VCF file -- or drag one from Explorer anywhere onto this window.")
+        load_btn = QPushButton(t("Load file..."))
+        load_btn.setToolTip(t("Open a VCF file -- or drag one from Explorer anywhere onto this window."))
         load_btn.clicked.connect(self._on_load_file)
         row.addWidget(load_btn)
         self.load_status_label = QLabel("")
@@ -640,26 +629,52 @@ class MainWindow(QMainWindow):
         self.about_vcf_button.setAutoRaise(True)
         self.about_vcf_button.setCursor(Qt.PointingHandCursor)
         self.about_vcf_button.setToolTip(
-            "About this VCF -- shows the currently loaded file's reference build, date, sample(s), and "
-            "variant count, parsed from its own header."
+            t("About this VCF -- shows the currently loaded file's reference build, date, sample(s), and "
+            "variant count, parsed from its own header.")
         )
         self.about_vcf_button.clicked.connect(self._on_about_vcf)
         row.addWidget(self.about_vcf_button)
 
-        self.check_compat_button = QPushButton("Check compatibility")
+        self.check_compat_button = QPushButton(t("Check compatibility"))
         self.check_compat_button.clicked.connect(self._on_check_compatibility)
         row.addWidget(self.check_compat_button)
-        self.compat_help_button = self._make_help_button("Check compatibility", COMPAT_HELP_TEXT)
+        self.compat_help_button = self._make_help_button(t("Check compatibility"), COMPAT_HELP_TEXT)
         row.addWidget(self.compat_help_button)
         self.compat_status_label = QLabel("")
         row.addWidget(self.compat_status_label)
 
-        self.clear_vcf_button = QPushButton("Clear")
+        self.clear_vcf_button = QPushButton(t("Clear"))
         self.clear_vcf_button.clicked.connect(self._on_clear_vcf)
         row.addWidget(self.clear_vcf_button)
 
         row.addStretch(1)
         layout.addLayout(row)
+
+        # Limits the run itself to some genes, so a whole genome doesn't take
+        # hours (the results table's gene-set filter only hides rows). A choice
+        # made on purpose: Run stays off until one of the two is picked.
+        score_genes_row = QHBoxLayout()
+        score_genes_row.addWidget(QLabel(t("Genes to score:")))
+        self._score_genes, self._score_genes_chosen = [], False
+        self.all_genes_button = QPushButton(t("All genes"))
+        self.all_genes_button.setObjectName("allGenesButton")
+        self.all_genes_button.setCheckable(True)
+        self.all_genes_button.clicked.connect(lambda: self._set_score_genes([], chosen=True))
+        score_genes_row.addWidget(self.all_genes_button)
+        self.choose_score_genes_button = QPushButton(t("Choose gene list..."))
+        self.choose_score_genes_button.setObjectName("geneListButton")
+        self.choose_score_genes_button.setCheckable(True)
+        self.choose_score_genes_button.clicked.connect(self._on_choose_score_genes)
+        score_genes_row.addWidget(self.choose_score_genes_button)
+        score_genes_row.addWidget(self._make_help_button(t("Genes to score"), SCORE_GENES_HELP_TEXT))
+        score_genes_row.addSpacing(12)
+        score_genes_row.addWidget(self.run_button)
+        self.score_genes_label = QLabel("")
+        self.score_genes_label.setWordWrap(True)     # wraps rather than widening the window on a small screen
+        score_genes_row.addWidget(self.score_genes_label, stretch=1)
+        score_genes_row.addStretch(1)
+        layout.addLayout(score_genes_row)
+        self._set_score_genes([], chosen=False)
 
         return group
 
@@ -674,7 +689,7 @@ class MainWindow(QMainWindow):
         scoring against the wrong build gives wrong answers quietly, so that
         one must never be out of sight.
         """
-        group = QGroupBox("Settings")
+        group = QGroupBox(t("Settings"))
         layout = QVBoxLayout(group)
 
         self.build_combo = QComboBox()
@@ -694,14 +709,14 @@ class MainWindow(QMainWindow):
         self._build_detect_timer.timeout.connect(self._detect_vcf_build)
 
         top_row = QHBoxLayout()
-        top_row.addWidget(QLabel("Mode:"))
+        top_row.addWidget(QLabel(t("Mode:")))
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(list(MODES))
         self.mode_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         self.mode_combo.setMinimumWidth(100)
         top_row.addWidget(self.mode_combo)
 
-        self.mode_help_button = self._make_help_button("Raw vs Masked scoring", MODE_HELP_TEXT)
+        self.mode_help_button = self._make_help_button(t("Raw vs Masked scoring"), MODE_HELP_TEXT)
         top_row.addWidget(self.mode_help_button)
 
         top_row.addSpacing(24)
@@ -714,8 +729,8 @@ class MainWindow(QMainWindow):
         layout.addLayout(top_row)
 
         precomp_row = QHBoxLayout()
-        self.use_precomputed_radio = QRadioButton("Use precomputed data")
-        self.no_precomputed_radio = QRadioButton("I don't have precomputed data")
+        self.use_precomputed_radio = QRadioButton(t("Use precomputed data"))
+        self.no_precomputed_radio = QRadioButton(t("I don't have precomputed data"))
         self.precomputed_group = QButtonGroup(self)
         self.precomputed_group.addButton(self.use_precomputed_radio)
         self.precomputed_group.addButton(self.no_precomputed_radio)
@@ -723,24 +738,24 @@ class MainWindow(QMainWindow):
         self.no_precomputed_radio.toggled.connect(self._update_precomputed_enabled)
         precomp_row.addWidget(self.use_precomputed_radio)
         precomp_row.addWidget(self.no_precomputed_radio)
-        self.precomputed_help_button = self._make_help_button("Precomputed data", PRECOMPUTED_HELP_TEXT)
+        self.precomputed_help_button = self._make_help_button(t("Precomputed data"), PRECOMPUTED_HELP_TEXT)
         precomp_row.addWidget(self.precomputed_help_button)
         precomp_row.addStretch(1)
         layout.addLayout(precomp_row)
 
         precomp_dir_row = QHBoxLayout()
-        precomp_dir_row.addWidget(QLabel("Precomputed data folder:"))
+        precomp_dir_row.addWidget(QLabel(t("Precomputed data folder:")))
         self.precomputed_dir_edit = PathLineEdit()
         self.precomputed_dir_edit.pathDropped.connect(
             lambda p: self._handle_dropped_file(p, folder_edit=self.precomputed_dir_edit))
         self.precomputed_dir_edit.textChanged.connect(self._update_run_enabled)
         precomp_dir_row.addWidget(self.precomputed_dir_edit, stretch=1)
-        self.precomputed_dir_browse = QPushButton("Browse...")
+        self.precomputed_dir_browse = QPushButton(t("Browse..."))
         self.precomputed_dir_browse.clicked.connect(self._on_browse_precomputed_dir)
         precomp_dir_row.addWidget(self.precomputed_dir_browse)
         layout.addLayout(precomp_dir_row)
 
-        self.skip_precomputed_checkbox = QCheckBox("Skip variants already in precomputed data")
+        self.skip_precomputed_checkbox = QCheckBox(t("Skip variants already in precomputed data"))
         layout.addWidget(self.skip_precomputed_checkbox)
 
         # --- advanced settings --------------------------------------------
@@ -764,7 +779,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.advanced_widget)
 
         build_row = QHBoxLayout()
-        build_row.addWidget(QLabel("Genome build:"))
+        build_row.addWidget(QLabel(t("Genome build:")))
         build_row.addWidget(self.build_combo)
         build_row.addWidget(self.build_source_label)
         build_row.addStretch(1)
@@ -778,27 +793,27 @@ class MainWindow(QMainWindow):
         fasta_rows_layout = QVBoxLayout(self.fasta_rows_widget)
         fasta_rows_layout.setContentsMargins(0, 0, 0, 0)
         advanced_layout.addWidget(self.fasta_rows_widget)
-        label_width = self.fontMetrics().horizontalAdvance("hg38 reference FASTA (used for this run):") + 12
+        label_width = self.fontMetrics().horizontalAdvance(t("{build} reference FASTA (used for this run):", build="hg38")) + 12
         for build in BUILDS:
             fasta_row = QHBoxLayout()
             label = QLabel()
             label.setMinimumWidth(label_width)
             fasta_row.addWidget(label)
             edit = PathLineEdit()
-            edit.setPlaceholderText(f"{build}.fa -- keep its .fa.fai next to it")
-            edit.setToolTip(f"The {build} reference FASTA -- Browse..., or drag the .fa file here.")
+            edit.setPlaceholderText(t("{build}.fa -- keep its .fa.fai next to it", build=build))
+            edit.setToolTip(t("The {build} reference FASTA -- Browse..., or drag the .fa file here.", build=build))
             edit.pathDropped.connect(lambda p, b=build: self._handle_dropped_file(p, fasta_build=b))
             edit.textChanged.connect(self._update_run_enabled)
             fasta_row.addWidget(edit, stretch=1)
-            browse = QPushButton("Browse...")
+            browse = QPushButton(t("Browse..."))
             browse.clicked.connect(lambda _checked=False, b=build: self._on_browse_fasta(b))
             fasta_row.addWidget(browse)
-            download = QPushButton("Download...")
-            download.setToolTip(f"Download {build}.fa from UCSC, decompress it and build its index")
+            download = QPushButton(t("Download..."))
+            download.setToolTip(t("Download {build}.fa from UCSC, decompress it and build its index", build=build))
             download.clicked.connect(lambda _checked=False, b=build: self._on_download_reference(b))
             fasta_row.addWidget(download)
             # A "?" on every row also keeps both rows' fields exactly aligned.
-            help_button = self._make_help_button("Reference FASTA", FASTA_HELP_TEXT)
+            help_button = self._make_help_button(t("Reference FASTA"), FASTA_HELP_TEXT)
             fasta_row.addWidget(help_button)
             if build == BUILDS[0]:
                 self.fasta_help_button = help_button
@@ -809,17 +824,27 @@ class MainWindow(QMainWindow):
         self._update_fasta_rows()
 
         snpeff_opt_row = QHBoxLayout()
-        self.use_snpeff_checkbox = QCheckBox("Annotate with SnpEff")
+        self._snpeff_unavailable = False    # the box is off only because SnpEff isn't there, not by choice
+        self.use_snpeff_checkbox = QCheckBox(t("Annotate with SnpEff"))
         self.use_snpeff_checkbox.setToolTip(
-            "On by default: SnpEff comes with the program. Turning it off drops the "
-            "coding position and transcript (NM) columns, and makes a run a little faster."
+            t("On by default: SnpEff comes with the program. Turning it off drops the "
+            "coding position and transcript (NM) columns, and makes a run a little faster.")
         )
         self.use_snpeff_checkbox.toggled.connect(self._on_use_snpeff_toggled)
+        # Always on: SnpEff comes with Setup, so there is no setting. The box
+        # stays as the run's internal switch (off only when SnpEff isn't there).
+        self.use_snpeff_checkbox.setVisible(False)
         snpeff_opt_row.addWidget(self.use_snpeff_checkbox)
-        snpeff_opt_row.addWidget(QLabel("Gives the coding position and transcript (NM) columns."))
-        self.snpeff_about_help_button = self._make_help_button("About SnpEff", SNPEFF_ABOUT_HELP_TEXT)
+        snpeff_opt_row.addWidget(QLabel(t("SnpEff (always on): gives the coding position and transcript (NM) columns.")))
+        self.use_mane_checkbox = QCheckBox(t("MANE Select"))
+        self.use_mane_checkbox.setToolTip(
+            t("On by default: where a gene has a MANE Select transcript, that NM_ is the one reported. Off: SnpEff's "
+            "transcript order decides, curated (NM_) ones first.")
+        )
+        snpeff_opt_row.addWidget(self.use_mane_checkbox)
+        self.snpeff_about_help_button = self._make_help_button(t("About SnpEff"), SNPEFF_ABOUT_HELP_TEXT)
         snpeff_opt_row.addWidget(self.snpeff_about_help_button)
-        self.snpeff_help_button = self._make_help_button("SnpEff setup", SNPEFF_HELP_TEXT)
+        self.snpeff_help_button = self._make_help_button(t("SnpEff setup"), SNPEFF_HELP_TEXT)
         snpeff_opt_row.addWidget(self.snpeff_help_button)
         snpeff_opt_row.addStretch(1)
         advanced_layout.addLayout(snpeff_opt_row)
@@ -834,16 +859,16 @@ class MainWindow(QMainWindow):
         snpeff_config_layout.setContentsMargins(0, 0, 0, 0)
 
         snpeff_row = QHBoxLayout()
-        snpeff_row.addWidget(QLabel("SnpEff install folder:"))
+        snpeff_row.addWidget(QLabel(t("SnpEff install folder:")))
         self.snpeff_dir_edit = PathLineEdit()
         self.snpeff_dir_edit.pathDropped.connect(lambda p: self._handle_dropped_file(p, folder_edit=self.snpeff_dir_edit))
         self.snpeff_dir_edit.setPlaceholderText(DEFAULT_SNPEFF_DIR)
         self.snpeff_dir_edit.textChanged.connect(self._update_run_enabled)
         snpeff_row.addWidget(self.snpeff_dir_edit, stretch=1)
-        snpeff_dir_browse = QPushButton("Browse...")
+        snpeff_dir_browse = QPushButton(t("Browse..."))
         snpeff_dir_browse.clicked.connect(self._on_browse_snpeff_dir)
         snpeff_row.addWidget(snpeff_dir_browse)
-        self.download_snpeff_button = QPushButton("Download SnpEff...")
+        self.download_snpeff_button = QPushButton(t("Download SnpEff..."))
         self.download_snpeff_button.clicked.connect(self._on_download_snpeff)
         snpeff_row.addWidget(self.download_snpeff_button)
         self.snpeff_status_label = QLabel("")
@@ -851,7 +876,9 @@ class MainWindow(QMainWindow):
         snpeff_config_layout.addLayout(snpeff_row)
 
         mane_row = QHBoxLayout()
-        mane_row.addWidget(QLabel("MANE Select folder (optional -- improves transcript choice):"))
+        mane_label = QLabel(t("MANE Select folder:"))
+        mane_label.setToolTip(t("Optional: improves the choice of transcript."))
+        mane_row.addWidget(mane_label)
         # Where the MANE summary file is -- empty means the program's own
         # "mane" folder (DEFAULT_MANE_DIR). Passed to the run (worker.py).
         self.mane_dir_edit = PathLineEdit()
@@ -859,16 +886,16 @@ class MainWindow(QMainWindow):
         self.mane_dir_edit.setPlaceholderText(DEFAULT_MANE_DIR)
         self.mane_dir_edit.textChanged.connect(self._update_mane_status_label)
         mane_row.addWidget(self.mane_dir_edit, stretch=1)
-        mane_browse = QPushButton("Browse...")
-        mane_browse.setToolTip("Select a MANE summary file you already have (MANE.GRCh38.vX.X.summary.txt.gz)")
+        mane_browse = QPushButton(t("Browse..."))
+        mane_browse.setToolTip(t("Select a MANE summary file you already have (MANE.GRCh38.vX.X.summary.txt.gz)"))
         mane_browse.clicked.connect(self._on_browse_mane_file)
         mane_row.addWidget(mane_browse)
-        self.download_mane_button = QPushButton("Download MANE Select...")
+        self.download_mane_button = QPushButton(t("Download MANE Select..."))
         self.download_mane_button.clicked.connect(self._on_download_mane)
         mane_row.addWidget(self.download_mane_button)
         self.mane_status_label = QLabel("")
         mane_row.addWidget(self.mane_status_label)
-        self.mane_help_button = self._make_help_button("MANE Select data", MANE_HELP_TEXT)
+        self.mane_help_button = self._make_help_button(t("MANE Select data"), MANE_HELP_TEXT)
         mane_row.addWidget(self.mane_help_button)
         snpeff_config_layout.addLayout(mane_row)
 
@@ -880,9 +907,8 @@ class MainWindow(QMainWindow):
         # nothing to act on. Rather than leaving a gap where those rows were,
         # say what was lost and how to get it back.
         self.snpeff_off_label = QLabel(
-            "SnpEff is off, so results have no transcript (NM) or coding position, and "
-            "MANE Select isn't used. Tick \"Annotate with SnpEff\" above for both -- "
-            "it comes with the program and needs nothing downloaded."
+            t("SnpEff wasn't found, so results have no transcript (NM) or coding position. It comes with the "
+            "program: reinstalling restores it, or use \"Download SnpEff...\" below.")
         )
         self.snpeff_off_label.setWordWrap(True)
         self.snpeff_off_label.setStyleSheet(theme.STATUS_WARN)
@@ -893,27 +919,27 @@ class MainWindow(QMainWindow):
 
     def _build_run_row(self):
         row = QHBoxLayout()
-        self.run_button = QPushButton("Run")
+        self.run_button = QPushButton(t("Run"))
         # The one button that starts the work; styled as the accent (theme.py).
         self.run_button.setObjectName("runButton")
         self.run_button.clicked.connect(self._on_run_clicked)
-        row.addWidget(self.run_button)
+        # Placed in the Input VCF section, right of the Genes-to-score choice it waits for.
 
         # Only enabled while a run is going (see _set_running).
-        self.pause_button = QPushButton("Pause")
-        self.pause_button.setToolTip("Pause the calculation after the current variant; click again to resume.")
+        self.pause_button = QPushButton(t("Pause"))
+        self.pause_button.setToolTip(t("Pause the calculation after the current variant; click again to resume."))
         self.pause_button.setEnabled(False)
         self.pause_button.clicked.connect(self._on_pause_clicked)
         row.addWidget(self.pause_button)
-        self.end_button = QPushButton("End")
-        self.end_button.setToolTip("End the calculation now (its results are discarded).")
+        self.end_button = QPushButton(t("End"))
+        self.end_button.setToolTip(t("End the calculation now (its results are discarded)."))
         self.end_button.setEnabled(False)
         self.end_button.clicked.connect(self._on_end_clicked)
         row.addWidget(self.end_button)
 
-        self.summary_button = QPushButton("Summary")
+        self.summary_button = QPushButton(t("Summary"))
         self.summary_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon))
-        self.summary_button.setToolTip("Quick statistics for the most recently completed run (full result set, not the filtered/paginated view).")
+        self.summary_button.setToolTip(t("Summary statistics for the most recently completed run (all results, not the filtered or paginated view)."))
         self.summary_button.setEnabled(False)
         self.summary_button.clicked.connect(self._on_show_summary)
         row.addWidget(self.summary_button)
@@ -929,8 +955,8 @@ class MainWindow(QMainWindow):
         # CPU use while a run is going (see cpu_meter.py and _update_cpu_label).
         self.cpu_label = QLabel("")
         self.cpu_label.setToolTip(
-            "CPU use: this program's share of the whole processor, the whole computer's "
-            "(including SnpEff's Java), and the time since the run started."
+            t("CPU use: this program's share of the whole processor, the whole computer's "
+            "(including SnpEff's Java), and the time since the run started.")
         )
         self.cpu_label.setVisible(False)
         row.addWidget(self.cpu_label)
@@ -941,70 +967,69 @@ class MainWindow(QMainWindow):
         return row
 
     def _build_results_group(self):
-        group = QGroupBox("Results")
+        group = QGroupBox(t("Results"))
         layout = QVBoxLayout(group)
 
         filter_row = QHBoxLayout()
         filter_row.addWidget(QLabel("max_score >="))
         self.threshold_buttons = {}
-        for t in THRESHOLDS:
-            btn = QPushButton(str(t))
+        for threshold in THRESHOLDS:
+            btn = QPushButton(str(threshold))
             btn.setCheckable(True)
-            btn.clicked.connect(lambda checked, val=t: self._on_threshold_clicked(val, checked))
-            self.threshold_buttons[t] = btn
+            btn.clicked.connect(lambda checked, val=threshold: self._on_threshold_clicked(val, checked))
+            self.threshold_buttons[threshold] = btn
             filter_row.addWidget(btn)
 
-        self.score_help_button = self._make_help_button("How to interpret scores", SCORE_HELP_TEXT)
+        self.score_help_button = self._make_help_button(t("How to interpret scores"), SCORE_HELP_TEXT)
         filter_row.addWidget(self.score_help_button)
+        filter_row.addSpacing(12)
 
-        filter_row.addStretch(1)
-
-        self.export_button = QPushButton("Export visible rows...")
-        self.export_button.setToolTip("Exports only the rows currently shown -- respects active gene/threshold filters and sort order.")
-        self.export_button.clicked.connect(self._on_export_clicked)
-        filter_row.addWidget(self.export_button)
-
-        self.download_full_button = QPushButton("Download full results...")
-        self.download_full_button.setToolTip("Exports the complete result set from the most recent run, ignoring any active filters.")
-        self.download_full_button.clicked.connect(self._on_download_full_results)
-        filter_row.addWidget(self.download_full_button)
-
-        self.open_calculated_button = QPushButton("Open calculated data...")
-        self.open_calculated_button.setToolTip("Loads a previously saved results file (CLI or GUI output) directly into the table, skipping scoring.")
-        self.open_calculated_button.clicked.connect(self._on_open_calculated_data)
-        filter_row.addWidget(self.open_calculated_button)
-
-        self.clear_results_button = QPushButton("Clear results")
-        self.clear_results_button.clicked.connect(self._on_clear_results)
-        filter_row.addWidget(self.clear_results_button)
-
-        layout.addLayout(filter_row)
-
-        quick_gene_row = QHBoxLayout()
-        quick_gene_row.addWidget(QLabel("Quick gene filter:"))
+        filter_row.addWidget(QLabel(t("Quick gene filter:")))
         self.quick_gene_edit = QLineEdit()
-        self.quick_gene_edit.setPlaceholderText("gene symbol, e.g. BRCA1")
+        self.quick_gene_edit.setPlaceholderText(t("gene symbol, e.g. BRCA1"))
         self.quick_gene_edit.returnPressed.connect(self._on_add_quick_gene)
-        quick_gene_row.addWidget(self.quick_gene_edit)
-        self.add_quick_gene_button = QPushButton("Add")
+        filter_row.addWidget(self.quick_gene_edit)
+        self.add_quick_gene_button = QPushButton(t("Add"))
         self.add_quick_gene_button.clicked.connect(self._on_add_quick_gene)
-        quick_gene_row.addWidget(self.add_quick_gene_button)
+        filter_row.addWidget(self.add_quick_gene_button)
 
         self.quick_gene_chips_layout = QHBoxLayout()
         self.quick_gene_chips_layout.setSpacing(4)
-        quick_gene_row.addLayout(self.quick_gene_chips_layout)
-        quick_gene_row.addStretch(1)
-        layout.addLayout(quick_gene_row)
+        filter_row.addLayout(self.quick_gene_chips_layout)
+        filter_row.addStretch(1)
+        layout.addLayout(filter_row)
+
+        files_row = QHBoxLayout()           # its own row: spec 17 item 5, the tab fits 731 logical px
+        self.export_button = QPushButton(t("Export visible rows..."))
+        self.export_button.setToolTip(t("Exports only the rows currently shown, following the active gene and threshold filters and the sort order."))
+        self.export_button.clicked.connect(self._on_export_clicked)
+        files_row.addWidget(self.export_button)
+
+        self.download_full_button = QPushButton(t("Download full results..."))
+        self.download_full_button.setToolTip(t("Exports the complete result set from the most recent run, ignoring any active filters."))
+        self.download_full_button.clicked.connect(self._on_download_full_results)
+        files_row.addWidget(self.download_full_button)
+
+        self.open_calculated_button = QPushButton(t("Open calculated data..."))
+        self.open_calculated_button.setToolTip(t("Loads a previously saved results file (CLI or GUI output) directly into the table, skipping scoring."))
+        self.open_calculated_button.clicked.connect(self._on_open_calculated_data)
+        files_row.addWidget(self.open_calculated_button)
+
+        self.clear_results_button = QPushButton(t("Clear results"))
+        self.clear_results_button.clicked.connect(self._on_clear_results)
+        files_row.addWidget(self.clear_results_button)
+        files_row.addStretch(1)
+        layout.addLayout(files_row)
 
         gene_set_row = QHBoxLayout()
-        self.import_gene_list_button = QPushButton("Import gene list...")
+        self.import_gene_list_button = QPushButton(t("Import gene list..."))
         self.import_gene_list_button.clicked.connect(self._on_import_gene_list)
         gene_set_row.addWidget(self.import_gene_list_button)
 
         self.gene_set_status_label = QLabel("")
         gene_set_row.addWidget(self.gene_set_status_label)
 
-        self.clear_gene_set_button = QPushButton("Clear gene-set filter")
+        self.clear_gene_set_button = QPushButton(t("Clear gene-set filter"))
         self.clear_gene_set_button.clicked.connect(self._on_clear_gene_set)
         self.clear_gene_set_button.setVisible(False)
         gene_set_row.addWidget(self.clear_gene_set_button)
@@ -1012,8 +1037,19 @@ class MainWindow(QMainWindow):
         gene_set_row.addStretch(1)
         layout.addLayout(gene_set_row)
 
-        self.row_count_label = QLabel("0 rows")
-        layout.addWidget(self.row_count_label)
+        count_row = QHBoxLayout()
+        self.row_count_label = QLabel(t("0 rows"))
+        count_row.addWidget(self.row_count_label)
+        count_row.addStretch(1)
+        # Spec 16 item 4: the selected variant(s) to the Sequence-to-cDNA tab.
+        self.transcript_effect_button = QPushButton(t("Analyse transcript effect..."))
+        self.transcript_effect_button.setToolTip(
+            t("Sends the selected variant to the Sequence to cDNA tab: the sample is built from the reference with "
+              "this variant only, and its predicted transcripts are compared with the reference and the WT "
+              "prediction. Up to {n} selected variants are run one after another.", n=vcf_bridge.MAX_QUEUE))
+        self.transcript_effect_button.clicked.connect(lambda: self.analyse_transcript_effect())
+        count_row.addWidget(self.transcript_effect_button)
+        layout.addLayout(count_row)
 
         self.no_results_label = QLabel("")
         self.no_results_label.setStyleSheet(f"color: {theme.CRIT}; font-style: italic;")
@@ -1021,11 +1057,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.no_results_label)
 
         self.table_model = ScoreTableModel()
-        self.proxy_model = ScoreFilterProxyModel()
-        self.proxy_model.setSourceModel(self.table_model)
-        self.proxy_model.rowsInserted.connect(self._on_proxy_changed)
-        self.proxy_model.rowsRemoved.connect(self._on_proxy_changed)
-        self.proxy_model.modelReset.connect(self._on_proxy_changed)
+        self.proxy_model = ScoreFilterProxyModel(self.table_model, on_changed=self._on_proxy_changed)
 
         # page_table_model is a second ScoreTableModel; the table view below is
         # attached to it rather than to proxy_model (see _refresh_page and
@@ -1050,9 +1082,6 @@ class MainWindow(QMainWindow):
         self._stripe_delegate = SeverityStripeDelegate(MAX_SCORE_COLUMN, self.table_view)
         self.table_view.setItemDelegateForColumn(0, self._stripe_delegate)
 
-        # sort(-1) is Qt's "no sort column": the proxy keeps the source
-        # model's row order.
-        self.proxy_model.sort(-1)
         self.table_view.horizontalHeader().sortIndicatorChanged.connect(self._on_sort_indicator_changed)
 
 
@@ -1069,12 +1098,12 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.table_view, stretch=1)
 
         pagination_row = QHBoxLayout()
-        self.prev_page_button = QPushButton("< Previous")
+        self.prev_page_button = QPushButton(t("< Previous"))
         self.prev_page_button.clicked.connect(self._on_prev_page)
         pagination_row.addWidget(self.prev_page_button)
-        self.page_indicator_label = QLabel("Page 1 of 1")
+        self.page_indicator_label = QLabel(t("Page 1 of 1"))
         pagination_row.addWidget(self.page_indicator_label)
-        self.next_page_button = QPushButton("Next >")
+        self.next_page_button = QPushButton(t("Next >"))
         self.next_page_button.clicked.connect(self._on_next_page)
         pagination_row.addWidget(self.next_page_button)
         pagination_row.addStretch(1)
@@ -1097,9 +1126,13 @@ class MainWindow(QMainWindow):
         # On unless SnpEff genuinely isn't there: it ships with Setup, but a
         # run from source (or a half-finished install) has no database, and an
         # unticked box the user can see beats a disabled Run button.
-        self.use_snpeff_checkbox.setChecked(settings["use_snpeff"])
-        if settings["use_snpeff"] and not self._snpeff_ready():
+        self.use_snpeff_checkbox.setChecked(True)
+        self.use_mane_checkbox.setChecked(settings["use_mane"])
+        self.use_mane_checkbox.setEnabled(True)
+        if not self._snpeff_ready():
             self.use_snpeff_checkbox.setChecked(False)
+            # Saved as it was, so annotating comes back by itself once SnpEff is there.
+            self._snpeff_unavailable = True
         self.skip_precomputed_checkbox.setChecked(settings["skip_precomputed"])
         if settings["build"] in BUILDS:
             self.build_combo.setCurrentText(settings["build"])
@@ -1112,6 +1145,8 @@ class MainWindow(QMainWindow):
 
         if settings["column_order"]:
             self._apply_column_order(settings["column_order"])
+        if isinstance(settings["score_genes"], list):
+            self._set_score_genes([g for g in settings["score_genes"] if isinstance(g, str)], chosen=False)
 
         # Only a list of the right shape, so an edited or older settings file
         # can't leave a pane at zero height with no way to get it back.
@@ -1119,6 +1154,8 @@ class MainWindow(QMainWindow):
         if (isinstance(sizes, list) and len(sizes) == self.panes.count()
                 and all(isinstance(n, int) and n > 0 for n in sizes)):
             self.panes.setSizes(sizes)
+            # Saved while Advanced settings were open: they start closed.
+            self._fit_settings_pane()
 
     def _save_settings(self):
         if self.use_precomputed_radio.isChecked():
@@ -1141,9 +1178,11 @@ class MainWindow(QMainWindow):
             "column_order": self._current_column_order(),
             "column_order_v2_applied": True,
             "pane_sizes": self.panes.sizes(),
+            "score_genes": self._score_genes,
             "snpeff_dir": self.snpeff_dir_edit.text().strip(),
             "mane_dir": self.mane_dir_edit.text().strip(),
-            "use_snpeff": self.use_snpeff_checkbox.isChecked(),
+            "use_snpeff": True,
+            "use_mane": self.use_mane_checkbox.isChecked(),
             "snpeff_default_applied": True,
         })
         config.save(settings)
@@ -1160,14 +1199,17 @@ class MainWindow(QMainWindow):
         """Reorders the header's visual sections to match a saved attr-name order.
         Unknown/missing names (e.g. a column added in a later version, or one the
         user never rearranged) are handled gracefully: unrecognized saved names are
-        ignored, and any current column not mentioned in the saved order is appended
-        at the end, rather than dropped."""
+        ignored, and any current column not mentioned in the saved order is placed
+        after the column it follows in COLUMNS (at the end if that one is missing too),
+        rather than dropped."""
         header = self.table_view.horizontalHeader()
         attr_to_logical = {attr: i for i, (_, attr, _) in enumerate(COLUMNS)}
         target = [attr_to_logical[a] for a in order_attrs if a in attr_to_logical]
         for logical in range(len(COLUMNS)):
             if logical not in target:
-                target.append(logical)
+                # A column added since: next to the one it follows by default.
+                after = target.index(logical - 1) + 1 if logical - 1 in target else len(target)
+                target.insert(after, logical)
         for visual_pos, logical_index in enumerate(target):
             current_visual = header.visualIndex(logical_index)
             if current_visual != visual_pos:
@@ -1176,9 +1218,9 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         if self._worker is not None and self._worker.isRunning():
             reply = QMessageBox.warning(
-                self, "Calculation still running",
-                "The calculation is not finished yet. Are you sure you want to exit?\n\n"
-                "The run will be stopped and its results discarded.",
+                self, t("Calculation still running"),
+                t("The calculation is not finished yet. Are you sure you want to exit?\n\n"
+                "The run will be stopped and its results discarded."),
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
             )
             if reply != QMessageBox.Yes:
@@ -1186,7 +1228,7 @@ class MainWindow(QMainWindow):
                 return
             # Stops at the next variant (SnpEff is killed at once); a thread
             # still running when the window goes would crash the program.
-            self.progress_label.setText("Stopping the calculation...")
+            self.progress_label.setText(t("Stopping the calculation..."))
             QApplication.setOverrideCursor(Qt.WaitCursor)
             try:
                 self._worker.stop()
@@ -1195,13 +1237,34 @@ class MainWindow(QMainWindow):
                     self._worker.wait(5000)
             finally:
                 QApplication.restoreOverrideCursor()
+        if self.refdb.proc is not None:
+            reply = QMessageBox.question(
+                self, t("Reference database build running"),
+                t("A reference database build is running. Close the program anyway?\n\n"
+                "The build stops now and continues from the last finished gene the next time you start the program."),
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                event.ignore()
+                return
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            try:
+                self.refdb.shutdown()
+            finally:
+                QApplication.restoreOverrideCursor()
+        # A Sequence-to-cDNA run stops at its next model call; its thread must
+        # not outlive the window.
+        if self.cdna_tab._run_worker is not None:
+            self.cdna_tab._run_worker.stop()
+            self.cdna_tab._run_worker.wait(30000)
+        self.cdna_tab._save_settings()
         self._save_settings()
         self._cleanup_temp_vcf()
         super().closeEvent(event)
 
     def _on_load_file(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Load VCF file", "", "VCF files (*.vcf *.vcf.gz *.vcf.bgz *.bgz);;All files (*)"
+            self, t("Load VCF file"), "", t("VCF files (*.vcf *.vcf.gz *.vcf.bgz *.bgz);;All files (*)")
         )
         if not path:
             return
@@ -1242,10 +1305,16 @@ class MainWindow(QMainWindow):
         """What a dragged-in file is for, by its name: a VCF loads (like "Load
         file..."), a FASTA goes into a reference row (fasta_build's when dropped
         onto that row, else the build its name says, else the selected one), a
-        MANE summary sets the MANE folder, and anything dropped onto a folder
-        field sets that field."""
+        MANE summary sets the MANE folder, a reference score database (its
+        folder or manifest.json) is offered for import, and anything dropped
+        onto a folder field sets that field."""
         name = path.lower()
-        if name.endswith(VCF_SUFFIXES):
+        database = database_folder_of(path) if folder_edit is None else None
+        if database:
+            self._open_refdb_dialog(import_folder=database)
+        elif self.tabs.currentWidget() is self.cdna_tab and folder_edit is None and fasta_build is None:
+            self.cdna_tab.handle_drop(path)
+        elif name.endswith(VCF_SUFFIXES):
             self._load_vcf_from_path(path)
         elif name.endswith(FASTA_SUFFIXES):
             build = fasta_build or config.guess_build_from_name(path) or self.build_combo.currentText()
@@ -1256,10 +1325,11 @@ class MainWindow(QMainWindow):
             folder_edit.setText(path if os.path.isdir(path) else os.path.dirname(path))
         else:
             QMessageBox.information(
-                self, "Can't use this file",
-                f"{os.path.basename(path)} can't be loaded here.\n\n"
-                "Drag in a VCF (.vcf, .vcf.gz) to score it, a reference FASTA (.fa, .fasta, .fna) "
-                "for its build's row, or a MANE summary file (MANE.GRCh38.vX.X.summary.txt.gz).",
+                self, t("Can't use this file"),
+                t("{name} can't be loaded here.\n\n"
+                  "Drag in a VCF (.vcf, .vcf.gz) to score it, a reference FASTA (.fa, .fasta, .fna) "
+                  "for its build's row, or a MANE summary file (MANE.GRCh38.vX.X.summary.txt.gz).",
+                  name=os.path.basename(path)),
             )
 
     def _load_vcf_from_path(self, path):
@@ -1269,7 +1339,7 @@ class MainWindow(QMainWindow):
             self.setCursor(Qt.WaitCursor)
             text = _read_vcf_text(path)
         except RuntimeError as exc:
-            QMessageBox.critical(self, "Failed to load file", f"{path}\n\n{exc}")
+            QMessageBox.critical(self, t("Failed to load file"), f"{path}\n\n{exc}")
             return
         finally:
             self.unsetCursor()
@@ -1277,7 +1347,7 @@ class MainWindow(QMainWindow):
         # names the same build as the previous one (see _detect_vcf_build).
         self._detected_build = (None, None)
         self.vcf_text.setPlainText(text)
-        self.load_status_label.setText(f"Loaded: {os.path.basename(path)}")
+        self.load_status_label.setText(t("Loaded: {name}", name=os.path.basename(path)))
         self._loaded_vcf_basename = strip_vcf_extension(os.path.basename(path))
 
     def _on_clear_vcf(self):
@@ -1286,6 +1356,7 @@ class MainWindow(QMainWindow):
         discard results still being viewed from a prior run."""
         self.vcf_text.clear()
         self.load_status_label.setText("")
+        self._set_score_genes(self._score_genes, chosen=False)
         self.compat_status_label.setStyleSheet("")
         # The compat label's text and tooltip are cleared by _on_vcf_text_changed,
         # which vcf_text.clear() above triggers through the textChanged signal.
@@ -1316,21 +1387,22 @@ class MainWindow(QMainWindow):
         if not self._vcf_present:
             text, style = "", ""
         elif build is None:
-            text, style = "⚠ build not stated in the VCF -- make sure this is right", theme.STATUS_WARN
+            text, style = "⚠ " + t("build not stated in the VCF -- make sure this is right"), theme.STATUS_WARN
         elif build == self.build_combo.currentText():
-            text, style = f"✓ from the VCF ({evidence})", theme.STATUS_OK
+            text, style = "✓ " + t("from the VCF ({evidence})", evidence=t(evidence)), theme.STATUS_OK
         else:
-            text, style = f"⚠ the VCF says {build} ({evidence})", theme.STATUS_CRIT
+            text, style = "⚠ " + t("the VCF says {build} ({evidence})", build=build, evidence=t(evidence)), \
+                theme.STATUS_CRIT
         self.build_source_label.setText(text)
         self.build_source_label.setStyleSheet(style)
         # The same thing again in the open, where the build combo no longer is.
         summary = getattr(self, "build_summary_label", None)
         if summary is not None:
             selected = self.build_combo.currentText()
-            summary.setText(f"Genome build: {selected} {text}".rstrip() if text else f"Genome build: {selected}")
+            summary.setText(t("Genome build: {build}", build=f"{selected} {text}".rstrip() if text else selected))
             summary.setStyleSheet(style or theme.STATUS_MUTED)
-            summary.setToolTip("Chosen from the VCF's own header. To set it by hand, "
-                               "open Advanced settings.")
+            summary.setToolTip(t("Chosen from the VCF's own header. To set it by hand, "
+                               "open Advanced settings."))
 
     def _on_build_changed(self, _build=None):
         self._update_fasta_rows()
@@ -1345,13 +1417,26 @@ class MainWindow(QMainWindow):
         selected = self.build_combo.currentText()
         for build, label in labels.items():
             active = build == selected
-            label.setText(f"{build} reference FASTA" + (" (used for this run):" if active else ":"))
+            label.setText(t("{build} reference FASTA (used for this run):", build=build) if active
+                          else t("{build} reference FASTA:", build=build))
             label.setStyleSheet("font-weight: 600;" if active else theme.STATUS_MUTED)
         self._update_setup_status()
 
     def _on_advanced_toggled(self, checked):
         self.advanced_widget.setVisible(checked)
-        self.advanced_button.setText("Hide advanced settings" if checked else "Advanced settings...")
+        self.advanced_button.setText(t("Hide advanced settings") if checked else t("Advanced settings..."))
+        if not checked:
+            self._fit_settings_pane()
+
+    def _fit_settings_pane(self):
+        """Opening Advanced settings makes the Settings pane taller; closing them
+        must give that height back (to the results), not leave it empty."""
+        pane = self.panes.widget(2)
+        pane.layout().activate()
+        need = pane.sizeHint().height()
+        sizes = self.panes.sizes()
+        if sizes[2] > need:
+            self.panes.setSizes([sizes[0] + sizes[2] - need, sizes[1], need])
 
     def setup_problems(self):
         """What, if anything, stops this being a normal run -- in the order a
@@ -1360,13 +1445,13 @@ class MainWindow(QMainWindow):
         problems = []
         if not self._selected_fasta():
             build = self.build_combo.currentText()
-            problems.append(f"the {build} reference genome hasn't been found")
+            problems.append(t("the {build} reference genome hasn't been found", build=build))
         # getattr: the FASTA rows are built (and ask for this) before the
         # SnpEff row below them exists.
         if getattr(self, "use_snpeff_checkbox", None) and self.use_snpeff_checkbox.isChecked():
             ready, short_message, _detail = self._snpeff_status()
             if not ready:
-                problems.append(short_message[0].lower() + short_message[1:])
+                problems.append(short_message[0].lower() + short_message[1:] if language() == "en" else short_message)
         return problems
 
     def _update_setup_status(self, _text=None):
@@ -1377,7 +1462,7 @@ class MainWindow(QMainWindow):
             return
         problems = self.setup_problems()
         if problems:
-            text = "⚠ " + "; ".join(problems) + " -- open Advanced settings."
+            text = "⚠ " + "; ".join(problems) + t(" -- open Advanced settings.")
             style = theme.STATUS_CRIT
         else:
             # Only the paths still holding what was detected -- once the user
@@ -1387,11 +1472,11 @@ class MainWindow(QMainWindow):
             set_builds = [b for b in BUILDS if self.fasta_edits[b].text().strip()]
             folders = {os.path.dirname(detected[b]) for b in set_builds
                        if detected.get(b) == self.fasta_edits[b].text().strip()}
-            where = f", found in {sorted(folders)[0]}" if len(folders) == 1 else ""
-            parts = ["reference genome " + " and ".join(set_builds)]
+            where = t(", found in {folder}", folder=sorted(folders)[0]) if len(folders) == 1 else ""
+            parts = [t("reference genome {builds}", builds=t(" and ").join(set_builds))]
             if self.use_snpeff_checkbox.isChecked():
                 parts.append("SnpEff")
-            text = f"Ready: {', '.join(parts)}{where}."
+            text = t("Ready: {what}{where}.", what=", ".join(parts), where=where)
             style = theme.STATUS_MUTED
         label.setText(text)
         label.setStyleSheet(style)
@@ -1423,42 +1508,43 @@ class MainWindow(QMainWindow):
     def _on_about_vcf(self):
         text = self.vcf_text.toPlainText()
         if not text.strip():
-            QMessageBox.information(self, "About this VCF", "No VCF is currently loaded.")
+            QMessageBox.information(self, t("About this VCF"), t("No VCF is currently loaded."))
             return
 
         info = summarize_vcf_text(text)
         lines = []
 
         if info.detected_build_raw:
-            lines.append(f"Reference (from header): {info.detected_build_raw}")
+            lines.append(t("Reference (from header): {ref}", ref=info.detected_build_raw))
         build, evidence = detect_vcf_build(text)
         selected_build = self.build_combo.currentText()
         if build:
-            lines.append(f"Genome build: {build} ({evidence})")
+            lines.append(t("Genome build: {build}", build=f"{build} ({t(evidence)})"))
             if build != selected_build:
-                lines.append(f"⚠ The file is {build}, but {selected_build} is currently selected.")
+                lines.append("⚠ " + t("The file is {build}, but {selected} is currently selected.", build=build,
+                                      selected=selected_build))
         else:
-            lines.append("Genome build: not stated in the file (no ##reference line or ##contig lengths)")
+            lines.append(t("Genome build: not stated in the file (no ##reference line or ##contig lengths)"))
 
         if info.file_date:
-            lines.append(f"File date: {info.file_date}")
+            lines.append(t("File date: {date}", date=info.file_date))
         if info.samples:
-            label = "Sample" if len(info.samples) == 1 else "Samples"
+            label = t("Sample") if len(info.samples) == 1 else t("Samples")
             lines.append(f"{label}: {', '.join(info.samples)}")
-        lines.append(f"Variant records: {info.variant_count:,}")
+        lines.append(t("Variant records: {n:,}", n=info.variant_count))
         if info.source:
-            lines.append(f"Source: {info.source}")
+            lines.append(t("Source: {source}", source=info.source))
         if info.contig_count:
-            lines.append(f"Contigs: {info.contig_count}")
+            lines.append(t("Contigs: {n}", n=info.contig_count))
 
-        title = "About this VCF"
+        title = t("About this VCF")
         if self._loaded_vcf_basename:
             title += f" -- {self._loaded_vcf_basename}"
         QMessageBox.information(self, title, "\n".join(lines))
 
     def _on_check_compatibility(self):
         result = check_vcf_text(self.vcf_text.toPlainText())
-        prefix = "✓ PASS" if result.ok else "✗ FAIL"
+        prefix = "✓ " + t("PASS") if result.ok else "✗ " + t("FAIL")
         color = "#1a7f37" if result.ok else "#b00020"
         self.compat_status_label.setText(f"{prefix}: {result.summary}")
         self.compat_status_label.setStyleSheet(f"color: {color}; font-weight: bold;")
@@ -1473,8 +1559,40 @@ class MainWindow(QMainWindow):
             genes = dialog.validated_genes()
             self._gene_set_filter = set(genes)
             self.proxy_model.set_gene_set(self._gene_set_filter)
-            self.gene_set_status_label.setText(f"Gene-set filter: {len(genes)} gene(s) active")
+            self.gene_set_status_label.setText(t("Gene-set filter: {n} gene(s) active", n=len(genes)))
             self.clear_gene_set_button.setVisible(True)
+
+    def _on_choose_score_genes(self):
+        # The last list (saved in the settings) is offered again.
+        dialog = GeneImportDialog(self, title=t("Genes to score"), apply_text=t("Score only these genes"),
+                                  genes=self._score_genes)
+        genes = dialog.validated_genes() if dialog.exec() == QDialog.Accepted else []
+        if genes:
+            self._set_score_genes(genes, chosen=True)
+        else:   # cancelled: the click must not leave the button looking chosen
+            self._set_score_genes(self._score_genes, chosen=self._score_genes_chosen)
+
+    def _set_score_genes(self, genes, chosen=True):
+        """genes [] = all genes. chosen=False: nothing picked yet for this VCF,
+        so Run waits (the list is kept, to be offered again)."""
+        self._score_genes, self._score_genes_chosen = list(genes), chosen
+        all_genes, a_list = chosen and not genes, chosen and bool(genes)
+        self.all_genes_button.setChecked(all_genes)
+        self.choose_score_genes_button.setChecked(a_list)
+        self.all_genes_button.setText(("✓ " if all_genes else "") + t("All genes"))
+        self.choose_score_genes_button.setText(("✓ " if a_list else "") + t("Choose gene list..."))
+        if a_list:
+            shown = (t("{genes} and {n} more", genes=", ".join(genes[:6]), n=len(genes) - 6) if len(genes) > 6
+                     else ", ".join(genes))
+            self.score_genes_label.setText(t("{n} gene(s): {genes}", n=len(genes), genes=shown))
+            self.score_genes_label.setStyleSheet(theme.STATUS_OK)
+            self.score_genes_label.setToolTip(", ".join(genes))
+        else:
+            self.score_genes_label.setText(t("all genes") if all_genes else t("Choose one to enable Run."))
+            self.score_genes_label.setStyleSheet(theme.STATUS_MUTED if all_genes else theme.STATUS_WARN)
+            self.score_genes_label.setToolTip("")
+        if hasattr(self, "fasta_edits"):    # not while the window is still being built
+            self._update_run_enabled()
 
     def _on_clear_gene_set(self):
         self._gene_set_filter = None
@@ -1483,19 +1601,19 @@ class MainWindow(QMainWindow):
         self.clear_gene_set_button.setVisible(False)
 
     def _on_browse_precomputed_dir(self):
-        path = QFileDialog.getExistingDirectory(self, "Select precomputed-scores folder")
+        path = QFileDialog.getExistingDirectory(self, t("Select precomputed-scores folder"))
         if path:
             self.precomputed_dir_edit.setText(path)
 
     def _on_browse_snpeff_dir(self):
-        path = QFileDialog.getExistingDirectory(self, "Select SnpEff install folder", self.snpeff_dir_edit.text() or DEFAULT_SNPEFF_DIR)
+        path = QFileDialog.getExistingDirectory(self, t("Select SnpEff install folder"), self.snpeff_dir_edit.text() or DEFAULT_SNPEFF_DIR)
         if path:
             self.snpeff_dir_edit.setText(path)
 
     def _on_browse_fasta(self, build):
         path, _ = QFileDialog.getOpenFileName(
-            self, f"Select the {build} reference FASTA", os.path.dirname(self.fasta_edits[build].text()),
-            "FASTA files (*.fa *.fasta *.fna);;All files (*)",
+            self, t("Select the {build} reference FASTA", build=build), os.path.dirname(self.fasta_edits[build].text()),
+            t("FASTA files (*.fa *.fasta *.fna);;All files (*)"),
         )
         if path:
             self._set_fasta(build, path)
@@ -1506,9 +1624,9 @@ class MainWindow(QMainWindow):
         named = config.guess_build_from_name(path)
         if named and named != build:
             reply = QMessageBox.question(
-                self, "Different build?",
-                f"{os.path.basename(path)} looks like an {named} file, but this is the {build} field.\n\n"
-                f"Use it for {build} anyway?",
+                self, t("Different build?"),
+                t("{name} looks like an {named} file, but this is the {build} field.\n\nUse it for {build} anyway?",
+                  name=os.path.basename(path), named=named, build=build),
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
             )
             if reply != QMessageBox.Yes:
@@ -1549,20 +1667,23 @@ class MainWindow(QMainWindow):
         # missing and no worker is running.
         missing = []
         if not has_vcf:
-            missing.append("load a VCF")
+            missing.append(t("load a VCF"))
         if not has_fasta:
-            missing.append(f"set the {self.build_combo.currentText()} reference FASTA")
+            missing.append(t("set the {build} reference FASTA", build=self.build_combo.currentText()))
         if not precomputed_chosen:
-            missing.append("choose a precomputed-data option")
+            missing.append(t("choose a precomputed-data option"))
         elif not precomputed_dir_ok:
-            missing.append("set the Precomputed data folder")
+            missing.append(t("set the Precomputed data folder"))
         if not snpeff_ready:
             missing.append(snpeff_short_message)
+        if not self._score_genes_chosen:
+            missing.append(t("choose All genes or a gene list"))
         self.run_button.setToolTip(
-            "Before you can run: " + "; ".join(missing) + "." if missing else ""
+            t("Before you can run: {what}.", what="; ".join(missing)) if missing else ""
         )
 
-        enabled = has_vcf and has_fasta and precomputed_chosen and precomputed_dir_ok and snpeff_ready
+        enabled = (has_vcf and has_fasta and precomputed_chosen and precomputed_dir_ok and snpeff_ready
+                   and self._score_genes_chosen)
         self.run_button.setEnabled(enabled and self._worker is None)
         self._update_setup_status()
 
@@ -1596,13 +1717,13 @@ class MainWindow(QMainWindow):
         except JavaNotFoundError as exc:
             # SnpEff is there but no usable Java: "Download SnpEff..." now fetches
             # just the Java part (installed parts are skipped).
-            return False, "Java for SnpEff isn't installed", str(exc)
+            return False, t("Java for SnpEff isn't installed"), str(exc)
         except SnpEffNotSetUpError as exc:
             detail = str(exc)
             if not os.path.isfile(snpeff_jar_path(snpeff_dir)):
-                short_message = "SnpEff isn't installed"
+                short_message = t("SnpEff isn't installed")
             else:
-                short_message = f"SnpEff database for {build} not installed"
+                short_message = t("SnpEff database for {build} not installed", build=build)
             return False, short_message, detail
 
     def _update_snpeff_status_label(self):
@@ -1612,7 +1733,7 @@ class MainWindow(QMainWindow):
             self.snpeff_status_label.setToolTip("")
             return
         if ready:
-            self.snpeff_status_label.setText("✓ Installed")
+            self.snpeff_status_label.setText(t("✓ Installed"))
             self.snpeff_status_label.setStyleSheet(theme.STATUS_OK)
             self.snpeff_status_label.setToolTip("")
 
@@ -1621,7 +1742,7 @@ class MainWindow(QMainWindow):
         # shown in gray (#5f5f5f), with the fuller detail message (which names
         # the missing path/command) as the tooltip.
         else:
-            self.snpeff_status_label.setText(f'{short_message} -- click "Download SnpEff..."')
+            self.snpeff_status_label.setText(short_message + " -- " + t('click "Download SnpEff..."'))
             self.snpeff_status_label.setStyleSheet(theme.STATUS_MUTED)
             self.snpeff_status_label.setToolTip(detail)
 
@@ -1647,31 +1768,34 @@ class MainWindow(QMainWindow):
         if path:
             # Short, so it fits a small window; the full path is the tooltip.
             version = os.path.basename(path).split(".summary")[0].rsplit(".v", 1)[-1]
-            self.mane_status_label.setText(f"✓ Found (MANE v{version})")
+            self.mane_status_label.setText("✓ " + t("Found (MANE v{version})", version=version))
             self.mane_status_label.setStyleSheet(theme.STATUS_OK)
             self.mane_status_label.setToolTip(path)
         else:
-            self.mane_status_label.setText("Not found")
+            self.mane_status_label.setText(t("Not found"))
             self.mane_status_label.setStyleSheet(theme.STATUS_MUTED)
-            self.mane_status_label.setToolTip(f"No MANE.GRCh38.vX.X.summary.txt.gz in {mane_dir}")
+            self.mane_status_label.setToolTip(t("No MANE.GRCh38.vX.X.summary.txt.gz in {folder}", folder=mane_dir))
 
     def _on_browse_mane_file(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select the MANE Select summary file", self._mane_dir(),
-            "MANE summary (MANE.GRCh38.v*.summary.txt.gz);;All files (*)",
+            self, t("Select the MANE Select summary file"), self._mane_dir(),
+            t("MANE summary (MANE.GRCh38.v*.summary.txt.gz);;All files (*)"),
         )
         if not path:
             return
         if not is_summary_filename(path):
             QMessageBox.warning(
-                self, "Not a MANE summary file",
-                f"{os.path.basename(path)} isn't a MANE summary file.\n\nExpected a name like "
-                "MANE.GRCh38.v1.5.summary.txt.gz (from ftp.ncbi.nlm.nih.gov/refseq/MANE).",
+                self, t("Not a MANE summary file"),
+                t("{name} isn't a MANE summary file.\n\nExpected a name like "
+                  "MANE.GRCh38.v1.5.summary.txt.gz (from ftp.ncbi.nlm.nih.gov/refseq/MANE).",
+                  name=os.path.basename(path)),
             )
             return
         self.mane_dir_edit.setText(os.path.dirname(path))
 
     def _on_use_snpeff_toggled(self, checked):
+        self._snpeff_unavailable = False
+        self.use_mane_checkbox.setEnabled(checked)
         self.snpeff_config_widget.setVisible(checked)
         self.snpeff_off_label.setVisible(not checked)
         if checked:
@@ -1718,7 +1842,7 @@ class MainWindow(QMainWindow):
         remove_btn.setText("×")
         remove_btn.setAutoRaise(True)
         remove_btn.setCursor(Qt.PointingHandCursor)
-        remove_btn.setToolTip(f"Remove {gene_name} from the filter")
+        remove_btn.setToolTip(t("Remove {gene} from the filter", gene=gene_name))
         remove_btn.clicked.connect(lambda: self._on_remove_quick_gene(gene_name))
         chip_layout.addWidget(remove_btn)
         self.quick_gene_chips_layout.addWidget(chip)
@@ -1737,7 +1861,6 @@ class MainWindow(QMainWindow):
 
     def _apply_quick_gene_filter(self):
         self.proxy_model.set_quick_gene_filters(self._quick_genes)
-        self._on_proxy_changed()
 
     def _on_proxy_changed(self, *_):
         """Fires whenever the FULL filtered/sorted set changes shape (a new run,
@@ -1764,17 +1887,15 @@ class MainWindow(QMainWindow):
 
         start = self._current_page * RESULTS_PAGE_SIZE
         end = min(start + RESULTS_PAGE_SIZE, total)
-        page_rows = [
-            self.table_model.row_at(self.proxy_model.mapToSource(self.proxy_model.index(r, 0)).row())
-            for r in range(start, end)
-        ]
+        page_rows = [self.proxy_model.row_at(r) for r in range(start, end)]
         self.page_table_model.set_rows(page_rows)
 
         if total == 0:
-            self.row_count_label.setText("Showing 0 of 0 rows")
+            self.row_count_label.setText(t("Showing 0 of 0 rows"))
         else:
-            self.row_count_label.setText(f"Showing {start + 1:,}–{end:,} of {total:,} rows")
-        self.page_indicator_label.setText(f"Page {self._current_page + 1} of {page_count}")
+            self.row_count_label.setText(t("Showing {first:,}–{last:,} of {total:,} rows", first=start + 1, last=end,
+                                           total=total))
+        self.page_indicator_label.setText(t("Page {page} of {pages}", page=self._current_page + 1, pages=page_count))
         self.prev_page_button.setEnabled(self._current_page > 0)
         self.next_page_button.setEnabled(self._current_page < page_count - 1)
 
@@ -1805,7 +1926,7 @@ class MainWindow(QMainWindow):
         visible = self.proxy_model.rowCount()
         if total > 0 and visible == 0 and self._quick_genes:
             genes_str = ", ".join(self._quick_genes)
-            self.no_results_label.setText(f"No variants found for: {genes_str}")
+            self.no_results_label.setText(t("No variants found for: {genes}", genes=genes_str))
             self.no_results_label.setVisible(True)
         else:
             self.no_results_label.setText("")
@@ -1817,10 +1938,93 @@ class MainWindow(QMainWindow):
             return
         row = self.page_table_model.row_at(index.row())
         menu = QMenu(self)
-        copy_action = menu.addAction(f"Copy variant ID ({row.variant_id})")
+        copy_action = menu.addAction(t("Copy variant ID ({id})", id=row.variant_id))
+        effect_action = menu.addAction(t("Analyse transcript effect..."))
         chosen = menu.exec(self.table_view.viewport().mapToGlobal(pos))
         if chosen == copy_action:
             QApplication.clipboard().setText(row.variant_id)
+        elif chosen == effect_action:
+            selected = self.selected_result_rows()
+            self.analyse_transcript_effect(selected if row.variant_id in {r.variant_id for r in selected} else [row])
+
+    def selected_result_rows(self):
+        """The variants of the rows selected in the results table, one row each (a variant scored in two genes
+        is one variant), in table order; rows that weren't scored are left out."""
+        rows, seen = [], set()
+        for index in sorted(self.table_view.selectionModel().selectedRows(), key=lambda i: i.row()):
+            r = self.page_table_model.row_at(index.row())
+            if r.variant_id not in seen and not (r.source or "").startswith("skipped"):
+                seen.add(r.variant_id)
+                rows.append(r)
+        return rows
+
+    def analyse_transcript_effect(self, rows=None, dialog_hook=None):
+        """Spec 16 item 4: the confirmation (TranscriptEffectDialog), then the Sequence-to-cDNA tab runs the
+        variant(s). dialog_hook(dialog) answers the dialog instead of a person (tests); it returns True for
+        Compute."""
+        rows = self.selected_result_rows() if rows is None else rows
+        if not rows:
+            QMessageBox.information(self, t("Analyse transcript effect"), t("Select a variant in the results first."))
+            return None
+        if len(rows) > vcf_bridge.MAX_QUEUE:
+            QMessageBox.warning(self, t("Analyse transcript effect"),
+                                t("{n} variants are selected; at most {most} can be queued.", n=len(rows),
+                                  most=vcf_bridge.MAX_QUEUE))
+            return None
+        last = getattr(self, "_last_run_settings", None) or {}
+        build, mode = last.get("build") or self.build_combo.currentText(), last.get("mode") or self.mode_combo.currentText()
+        tab = self.cdna_tab
+        try:
+            table, fasta = tab._table(build), tab._fasta(build)
+        except ValueError as exc:
+            QMessageBox.warning(self, t("Analyse transcript effect"), str(exc))
+            return None
+        bare = lambda chrom: chrom[3:] if chrom.lower().startswith("chr") else chrom
+
+        def genes_of(row):
+            names = sorted({r.gene for r in self._all_rows if r.variant_id == row.variant_id and r.gene} | {row.gene})
+            found, missing = [], []
+            for name in names:
+                hits = [g for g in table.find(name) if g.chrom == bare(row.chrom).upper()]
+                if hits:
+                    found += [g for g in hits if all(g is not f for f in found)]
+                else:
+                    missing.append(name)
+            return found, missing
+
+        def others_of(row, gene):
+            # By position as well as by name: a row can carry another symbol of the gene (precomputed data,
+            # older annotations) or a neighbouring gene's name only.
+            out, seen = [], {row.variant_id}
+            for r in self._all_rows:
+                inside = bare(r.chrom).upper() == gene.chrom and gene.mask[0] <= r.pos <= gene.mask[1]
+                if (r.gene == gene.name or inside) and r.variant_id not in seen \
+                        and not (r.source or "").startswith("skipped"):
+                    seen.add(r.variant_id)
+                    out.append(r)
+            return sorted(out, key=lambda r: r.pos)
+
+        vcf = self.vcf_text.toPlainText()
+        fetch = lambda chrom, a, b: fasta["chr" + bare(chrom)][a - 1:b].seq.upper()
+        normalize = lambda chrom, pos, ref, alt: normalize_variant(fetch, chrom, pos, ref, alt)
+        reader = self.refdb.reader(build)
+
+        def estimate_of(gene, edits):
+            seconds = haplotype.estimate_seconds([(0, 2 * haplotype.CONTEXT)] * edits) + 15
+            if reader is not None and reader.plan(gene.name) is not None:
+                return seconds, t("reference values from the database")
+            bases = gene.mask[1] - gene.mask[0] + 1 + 2 * refdb.MARGIN
+            return seconds + live_seconds(bases), t("the reference computed live first, {bases:,} bases", bases=bases)
+
+        dialog = TranscriptEffectDialog(self, build, rows, genes_of, others_of,
+                                        lambda r: vcf_bridge.genotype(vcf, r.chrom, r.pos, r.ref, r.alt, normalize),
+                                        estimate_of, mode)
+        accepted = dialog_hook(dialog) if dialog_hook else dialog.exec() == QDialog.Accepted
+        if not accepted:
+            return dialog
+        self.tabs.setCurrentWidget(tab)
+        tab.start_from_vcf(dialog.requests(), dialog.folder())
+        return dialog
 
     def _on_clear_results(self):
         """Empties the results table and resets every filter (quick gene chips,
@@ -1829,8 +2033,8 @@ class MainWindow(QMainWindow):
         can discard a run that took a while to produce."""
         if self.table_model.rowCount() > 0:
             reply = QMessageBox.question(
-                self, "Clear results?",
-                "This will discard the current results table. Continue?",
+                self, t("Clear results?"),
+                t("This will discard the current results table. Continue?"),
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
             )
             if reply != QMessageBox.Yes:
@@ -1873,9 +2077,10 @@ class MainWindow(QMainWindow):
         selected_build = self.build_combo.currentText()
         if detected_build and detected_build != selected_build:
             reply = QMessageBox.warning(
-                self, "Genome build mismatch",
-                f"This VCF is {detected_build} ({evidence}), but {selected_build} is selected.\n\n"
-                f"Scoring it as {selected_build} gives wrong or empty results. Run anyway?",
+                self, t("Genome build mismatch"),
+                t("This VCF is {detected} ({evidence}), but {selected} is selected.\n\n"
+                  "Scoring it as {selected} gives wrong or empty results. Run anyway?", detected=detected_build,
+                  evidence=t(evidence), selected=selected_build),
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
             )
             if reply != QMessageBox.Yes:
@@ -1894,7 +2099,7 @@ class MainWindow(QMainWindow):
         self.run_button.setEnabled(False)
         self.summary_button.setEnabled(False)
         self.progress_bar.setRange(0, 0)
-        self.progress_label.setText("Starting...")
+        self.progress_label.setText(t("Starting..."))
         self.table_model.set_rows([])
 
         self._run_start_time = time.time()
@@ -1903,6 +2108,7 @@ class MainWindow(QMainWindow):
             "mode": self.mode_combo.currentText(),
             "used_precomputed": self.use_precomputed_radio.isChecked(),
             "used_snpeff": self.use_snpeff_checkbox.isChecked(),
+            "score_genes": list(self._score_genes),
         }
 
         self._worker = PipelineWorker(
@@ -1915,6 +2121,8 @@ class MainWindow(QMainWindow):
             use_snpeff=self.use_snpeff_checkbox.isChecked(),
             snpeff_dir=self.snpeff_dir_edit.text().strip(),
             mane_dir=self.mane_dir_edit.text().strip(),
+            use_mane=self.use_mane_checkbox.isChecked(),
+            genes=self._score_genes or None,
         )
         self._worker.progress.connect(self._on_worker_progress)
         self._worker.finished_ok.connect(self._on_worker_finished)
@@ -1938,7 +2146,7 @@ class MainWindow(QMainWindow):
         self.table_model.set_rows(rows)
         self.progress_bar.setRange(0, 1)
         self.progress_bar.setValue(1)
-        self.progress_label.setText(f"Done -- {len(rows)} rows.")
+        self.progress_label.setText(t("Done -- {n} rows.", n=len(rows)))
         self._worker = None
         self._set_running(False)
         if self._run_start_time is not None:
@@ -1950,18 +2158,18 @@ class MainWindow(QMainWindow):
     def _on_worker_failed(self, message):
         self.progress_bar.setRange(0, 1)
         self.progress_bar.setValue(0)
-        self.progress_label.setText("Failed.")
+        self.progress_label.setText(t("Failed."))
         self._worker = None
         self._set_running(False)
         self._update_spliceai_status_indicator()
         self._run_start_time = None
         self._update_run_enabled()
-        QMessageBox.critical(self, "Pipeline error", message)
+        QMessageBox.critical(self, t("Pipeline error"), message)
 
     def _on_worker_cancelled(self):
         self.progress_bar.setRange(0, 1)
         self.progress_bar.setValue(0)
-        self.progress_label.setText("Run ended -- no results.")
+        self.progress_label.setText(t("Run ended -- no results."))
         self._worker = None
         self._set_running(False)
         self._run_start_time = None
@@ -1969,7 +2177,7 @@ class MainWindow(QMainWindow):
 
     def _set_running(self, running):
         """Pause/End and the CPU display are only live during a run."""
-        self.pause_button.setText("Pause")
+        self.pause_button.setText(t("Pause"))
         self.pause_button.setEnabled(running)
         self.end_button.setEnabled(running)
         self.cpu_label.setVisible(running)
@@ -1986,19 +2194,19 @@ class MainWindow(QMainWindow):
         control = self._worker.control
         if control.paused:
             control.resume()
-            self.pause_button.setText("Pause")
+            self.pause_button.setText(t("Pause"))
             self.progress_label.setText(self.progress_label.text().replace(PAUSED_PREFIX, ""))
         else:
             control.pause()
-            self.pause_button.setText("Resume")
+            self.pause_button.setText(t("Resume"))
             self.progress_label.setText(PAUSED_PREFIX + self.progress_label.text())
 
     def _on_end_clicked(self):
         if self._worker is None:
             return
         reply = QMessageBox.question(
-            self, "End the calculation?",
-            "End this calculation now? The variants scored so far are discarded.",
+            self, t("End the calculation?"),
+            t("End this calculation now? The variants scored so far are discarded."),
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
         )
         if reply != QMessageBox.Yes or self._worker is None:
@@ -2006,15 +2214,15 @@ class MainWindow(QMainWindow):
         self._worker.stop()
         self.pause_button.setEnabled(False)
         self.end_button.setEnabled(False)
-        self.progress_label.setText("Ending the calculation...")
+        self.progress_label.setText(t("Ending the calculation..."))
 
     def _update_cpu_label(self):
         app_pct, pc_pct = self._cpu_meter.sample()
         if app_pct is None:
             return
-        text = f"CPU: this program {app_pct:.0f}%"
+        text = t("CPU: this program {pct:.0f}%", pct=app_pct)
         if pc_pct is not None:
-            text += f" · whole PC {pc_pct:.0f}%"
+            text += " · " + t("whole PC {pct:.0f}%", pct=pc_pct)
         if self._run_start_time is not None:
             text += f" · {format_elapsed(time.time() - self._run_start_time)}"
         self.cpu_label.setText(text)
@@ -2040,46 +2248,46 @@ class MainWindow(QMainWindow):
             return f"{n / total_rows * 100:.1f}%" if total_rows else "0.0%"
 
         threshold_counts = {
-            t: sum(1 for r in rows if r.max_score is not None and r.max_score >= t)
-            for t in THRESHOLDS
+            x: sum(1 for r in rows if r.max_score is not None and r.max_score >= x)
+            for x in THRESHOLDS
         }
 
         settings = self._last_run_settings or {}
         duration_text = (
             format_elapsed(self._last_run_duration)
-            if self._last_run_duration is not None else "unknown"
+            if self._last_run_duration is not None else t("unknown")
         )
 
         lines = [
-            f"Total variants processed: {total_variants:,}",
-            f"Result rows: {total_rows:,} (can exceed variant count -- one row per matching gene/source)",
+            t("Total variants processed: {n:,}", n=total_variants),
+            t("Result rows: {n:,} (can exceed variant count -- one row per matching gene/source)", n=total_rows),
             "",
-            "Source breakdown (result rows):",
-            f"  Precomputed lookup: {n_precomputed:,} ({pct(n_precomputed)})",
-            f"  Live-scored: {n_live:,} ({pct(n_live)})",
-            f"  No gene overlap: {n_none:,} ({pct(n_none)})",
-            f"  Skipped, not scorable (reason in Source column): {n_skipped:,} ({pct(n_skipped)})",
+            t("Source breakdown (result rows):"),
+            "  " + t("Precomputed lookup: {n:,} ({pct})", n=n_precomputed, pct=pct(n_precomputed)),
+            "  " + t("Live-scored: {n:,} ({pct})", n=n_live, pct=pct(n_live)),
+            "  " + t("No gene overlap: {n:,} ({pct})", n=n_none, pct=pct(n_none)),
+            "  " + t("Skipped, not scorable (reason in Source column): {n:,} ({pct})", n=n_skipped, pct=pct(n_skipped)),
             "",
-            "Score thresholds (max_score >=):",
+            t("Score thresholds (max_score >=):"),
         ]
-        lines += [f"  >= {t}: {threshold_counts[t]:,}" for t in THRESHOLDS]
+        lines += [f"  >= {x}: {threshold_counts[x]:,}" for x in THRESHOLDS]
         lines += [
             "",
-            "Settings used for this run:",
-            f"  Build: {settings.get('build', 'unknown')}",
-            f"  Mode: {settings.get('mode', 'unknown')}",
-            f"  Precomputed data: {'used' if settings.get('used_precomputed') else 'not used'}",
-            f"  SnpEff annotation: {'enabled' if settings.get('used_snpeff') else 'disabled'}",
+            t("Settings used for this run:"),
+            "  " + t("Build: {build}", build=settings.get("build", t("unknown"))),
+            "  " + t("Mode: {mode}", mode=settings.get("mode", t("unknown"))),
+            "  " + (t("Precomputed data: used") if settings.get("used_precomputed") else t("Precomputed data: not used")),
+            "  " + (t("SnpEff annotation: enabled") if settings.get("used_snpeff") else t("SnpEff annotation: disabled")),
             "",
-            f"Run duration: {duration_text}",
+            t("Run duration: {time}", time=duration_text),
         ]
         return "\n".join(lines)
 
     def _on_show_summary(self):
         if not self._all_rows:
-            QMessageBox.information(self, "No results yet", "Run the pipeline first.")
+            QMessageBox.information(self, t("No results yet"), t("Run the pipeline first."))
             return
-        QMessageBox.information(self, "Run Summary", self._build_summary_text())
+        QMessageBox.information(self, t("Run Summary"), self._build_summary_text())
 
     def _current_column_specs(self):
         """CSV export column headers deliberately use the raw ScoreRow attribute
@@ -2100,57 +2308,78 @@ class MainWindow(QMainWindow):
 
     def _on_export_clicked(self):
         if self.table_model.rowCount() == 0:
-            QMessageBox.information(self, "Nothing to export", "Run the pipeline first.")
+            QMessageBox.information(self, t("Nothing to export"), t("Run the pipeline first."))
             return
         path, _ = QFileDialog.getSaveFileName(
-            self, "Export visible rows", self._default_export_filename(), "CSV files (*.csv);;TSV files (*.tsv)"
+            self, t("Export visible rows"), self._default_export_filename(), t("CSV files (*.csv);;TSV files (*.tsv)")
         )
         if not path:
             return
-        visible_rows = [
-            self.table_model.row_at(self.proxy_model.mapToSource(self.proxy_model.index(r, 0)).row())
-            for r in range(self.proxy_model.rowCount())
-        ]
+        visible_rows = [self.proxy_model.row_at(r) for r in range(self.proxy_model.rowCount())]
         delimiter = "\t" if path.lower().endswith(".tsv") else ","
         write_rows_ordered(visible_rows, path, self._current_column_specs(), delimiter=delimiter)
-        QMessageBox.information(self, "Export complete", f"Wrote {len(visible_rows)} rows to {path}")
+        QMessageBox.information(self, t("Export complete"), t("Wrote {n} rows to {path}", n=len(visible_rows), path=path))
 
     def _on_download_full_results(self):
         """Exports the complete result set from the most recent run, ignoring any
         active gene/threshold filters currently applied to the table view -- unlike
         "Export visible rows...", which intentionally respects them."""
         if not self._all_rows:
-            QMessageBox.information(self, "Nothing to download", "Run the pipeline first.")
+            QMessageBox.information(self, t("Nothing to download"), t("Run the pipeline first."))
             return
         path, _ = QFileDialog.getSaveFileName(
-            self, "Download full results", self._default_export_filename(), "CSV files (*.csv);;TSV files (*.tsv)"
+            self, t("Download full results"), self._default_export_filename(), t("CSV files (*.csv);;TSV files (*.tsv)")
         )
         if not path:
             return
         delimiter = "\t" if path.lower().endswith(".tsv") else ","
         write_rows_ordered(self._all_rows, path, self._current_column_specs(), delimiter=delimiter)
-        QMessageBox.information(self, "Download complete", f"Wrote {len(self._all_rows)} rows (full, unfiltered) to {path}")
+        QMessageBox.information(self, t("Download complete"), t("Wrote {n} rows (full, unfiltered) to {path}",
+                                                                 n=len(self._all_rows), path=path))
 
     def _on_open_calculated_data(self):
         """Loads a previously saved results file (CLI or GUI output) directly into
         the results table, skipping the VCF/scoring pipeline entirely. Independent
         of the Input VCF section -- doesn't touch it."""
         path, _ = QFileDialog.getOpenFileName(
-            self, "Open calculated data", "", "Results files (*.csv *.tsv);;All files (*)"
+            self, t("Open calculated data"), "", t("Results files (*.csv *.tsv);;All files (*)")
         )
         if not path:
             return
-        try:
-            rows = read_rows(path)
-        except ResultsFileError as exc:
-            QMessageBox.critical(self, "Could not load file", f"{path}\n\n{exc}")
-            return
+        # A WGS result takes ~20 s to parse: done off the GUI thread so the
+        # window keeps responding, polled from here.
+        self.open_calculated_button.setEnabled(False)
+        self.progress_bar.setRange(0, 0)
+        self.progress_label.setText(t("Loading {name}...", name=os.path.basename(path)))
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(read_rows, path)
+        executor.shutdown(wait=False)  # the thread ends once read_rows returns
+        timer = QTimer(self)
 
+        def poll():
+            if not future.done():
+                return
+            timer.stop()
+            timer.deleteLater()
+            self.open_calculated_button.setEnabled(True)
+            try:
+                rows = future.result()
+            except ResultsFileError as exc:
+                self.progress_bar.setRange(0, 1)
+                self.progress_label.setText("")
+                QMessageBox.critical(self, t("Could not load file"), f"{path}\n\n{exc}")
+                return
+            self._show_loaded_rows(path, rows)
+
+        timer.timeout.connect(poll)
+        timer.start(200)
+
+    def _show_loaded_rows(self, path, rows):
         self._all_rows = rows
         self.table_model.set_rows(rows)
         self.progress_bar.setRange(0, 1)
         self.progress_bar.setValue(1)
-        self.progress_label.setText(f"Loaded {len(rows)} rows from {os.path.basename(path)}.")
+        self.progress_label.setText(t("Loaded {n} rows from {name}.", n=len(rows), name=os.path.basename(path)))
         # Summary is disabled: a loaded file has no run settings or duration.
         self.summary_button.setEnabled(False)
         self._last_run_settings = None

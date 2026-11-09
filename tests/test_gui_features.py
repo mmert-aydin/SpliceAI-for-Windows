@@ -30,6 +30,8 @@ from pyfaidx import Fasta  # noqa: E402
 from PySide6.QtWidgets import QApplication, QMessageBox, QScrollArea  # noqa: E402
 
 from spliceai_gui import config, spliceai_setup  # noqa: E402
+from spliceai_gui import theme  # noqa: E402
+from spliceai_gui.theme import STYLESHEET as theme_sheet  # noqa: E402
 from spliceai_gui.cpu_meter import CpuMeter  # noqa: E402
 from spliceai_pipeline.control import RunCancelled, RunControl  # noqa: E402
 from spliceai_pipeline.mane import is_summary_filename  # noqa: E402
@@ -125,6 +127,123 @@ else:
 info = spliceai_setup.check_installation()
 check("the SpliceAI check: version 1.3.1, all model and annotation files",
       info and info["version"] == "1.3.1" and not info["missing_models"] and not info["missing_annotations"])
+
+# --- 1.2.0: scoring only chosen genes, and the Zygosity column -------------------
+from PySide6.QtCore import Qt  # noqa: E402
+
+from spliceai_gui.table_model import COLUMNS  # noqa: E402
+
+zyg_col = [a for _, a, _ in COLUMNS].index("zygosity")
+check("Zygosity is the column right after Gene", [a for _, a, _ in COLUMNS][:2] == ["gene", "zygosity"])
+w._apply_column_order([a for _, a, _ in COLUMNS if a != "zygosity"])  # saved by 1.1.1
+check("...also for a column order saved before it existed",
+      w.table_view.horizontalHeader().visualIndex(zyg_col) == 1)
+# Genes to score: in the Input VCF section, and a choice Run waits for.
+from PySide6.QtCore import QPoint, QTimer  # noqa: E402
+from PySide6.QtTest import QTest  # noqa: E402
+from PySide6.QtWidgets import QGroupBox  # noqa: E402
+
+
+def group_title(widget):
+    p = widget.parentWidget()
+    while p is not None and not isinstance(p, QGroupBox):
+        p = p.parentWidget()
+    return p.title() if p is not None else None
+
+
+def click(button):
+    QTest.mouseClick(button, Qt.LeftButton, Qt.NoModifier, QPoint(button.width() // 2, button.height() // 2))
+    app.processEvents()
+
+
+def in_gene_dialog(act, seen):
+    """Runs act(dialog) on the modal Genes-to-score dialog once it is open (Qt's exec() blocks the test)."""
+    def step():
+        dialog = QApplication.activeModalWidget()
+        if dialog is None or not hasattr(dialog, "paste_box"):
+            QTimer.singleShot(100, step)
+            return
+        act(dialog, seen)
+    QTimer.singleShot(100, step)
+
+
+check("Genes to score sits in the Input VCF section, both choices next to each other, Run right of them",
+      group_title(w.all_genes_button) == group_title(w.choose_score_genes_button) == group_title(w.run_button)
+      == "Input VCF" and w.all_genes_button.x() < w.choose_score_genes_button.x() < w.run_button.x())
+other = helpers.snv_lines(Fasta(str(helpers.HG19)), "chr2", [100_000_000])
+w.vcf_text.setPlainText(
+    "##fileformat=VCFv4.2\n##reference=hg19\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1\n"
+    "chr10\t27326999\t.\tT\tC\t.\t.\t.\tGT\t0/1\n" + other[0].rstrip("\n") + "\tGT\t1/1\n")
+settle(0.5)
+check("...nothing chosen yet: Run is off and says why, neither button is marked",
+      not w._score_genes_chosen and not w.run_button.isEnabled()
+      and "choose All genes or a gene list" in w.run_button.toolTip()
+      and not w.all_genes_button.isChecked() and not w.choose_score_genes_button.isChecked()
+      and w.score_genes_label.text() == "Choose one to enable Run.", w.run_button.toolTip())
+check("...All genes in the deeper orange, the gene list in the lighter one",
+      w.all_genes_button.objectName() == "allGenesButton" and w.choose_score_genes_button.objectName() == "geneListButton"
+      and theme.ORANGE in theme_sheet and theme.ORANGE_SOFT in theme_sheet)
+click(w.all_genes_button)
+check("All genes clicked: marked with a tick, Run on",
+      w._score_genes_chosen and w._score_genes == [] and w.all_genes_button.isChecked()
+      and w.all_genes_button.text() == "✓ All genes" and not w.choose_score_genes_button.isChecked()
+      and w.run_button.isEnabled(), w.run_button.toolTip())
+
+
+def pick_list(dialog, seen):
+    dialog.paste_box.setPlainText("ANKRD26, NOTAGENE1")
+    click(dialog.check_button)
+    seen["summary"] = dialog.summary_label.text()
+    seen["apply"] = dialog.apply_button.isEnabled()
+    click(dialog.apply_button)
+
+
+seen = {}
+in_gene_dialog(pick_list, seen)
+click(w.choose_score_genes_button)
+check("Choose gene list... (the real dialog): a pasted list is checked, the unknown symbol named, Apply enabled",
+      seen.get("apply") and "1 recognized, 1 not recognized" in seen.get("summary", ""), str(seen))
+check("...the list is the choice: marked with a tick, All genes no longer, shown, Run on",
+      w._score_genes_chosen and w._score_genes == ["ANKRD26"] and w.choose_score_genes_button.isChecked()
+      and w.choose_score_genes_button.text() == "✓ Choose gene list..." and not w.all_genes_button.isChecked()
+      and "1 gene(s): ANKRD26" in w.score_genes_label.text() and w.run_button.isEnabled())
+
+
+def cancel(dialog, seen):
+    seen["offered"] = dialog.paste_box.toPlainText()
+    click(dialog.cancel_button)
+
+
+seen = {}
+in_gene_dialog(cancel, seen)
+click(w.choose_score_genes_button)
+check("...opened again it offers the same list; Cancel leaves the choice as it was",
+      seen.get("offered") == "ANKRD26" and w._score_genes == ["ANKRD26"] and w.choose_score_genes_button.isChecked()
+      and w.run_button.isEnabled(), str(seen))
+w._save_settings()
+check("...and the list is remembered", config.load()["score_genes"] == ["ANKRD26"])
+vcf_now = w.vcf_text.toPlainText()
+click(w.clear_vcf_button)
+check("Clear: the choice is asked again (the list kept, to be offered)",
+      not w._score_genes_chosen and w._score_genes == ["ANKRD26"] and not w.choose_score_genes_button.isChecked())
+w.vcf_text.setPlainText(vcf_now)
+settle(0.5)
+check("...a VCF alone doesn't turn Run on", not w.run_button.isEnabled())
+w._set_score_genes(["ANKRD26"], chosen=True)
+w._on_run_clicked()
+check("a run with one chosen gene finishes", wait_for(lambda: w._worker is None, 300), w.progress_label.text())
+check("...the worker got the genes", "ANKRD26" in str(w._last_run_settings.get("score_genes")))
+model = w.table_model
+genes = [model.row_at(i).gene for i in range(model.rowCount())]
+check("...only that gene's variant is in the results", genes == ["ANKRD26"], str(genes))
+if genes:
+    cell = model.index(0, zyg_col)
+    check("...its Zygosity cell: 'Het' with the drawn icon and a tooltip",
+          cell.data(Qt.DisplayRole) == "Het" and cell.data(Qt.DecorationRole) is not None
+          and "Heterozygous" in (cell.data(Qt.ToolTipRole) or ""))
+w._set_score_genes([])
+w.vcf_text.setPlainText("")
+settle(0.3)
 
 w.use_snpeff_checkbox.setChecked(True)
 if helpers.MANE_DIR:

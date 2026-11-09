@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 from spliceai_pipeline.mane import DEFAULT_MANE_DIR, ManeDownloadError, fetch_mane_summary
+from .i18n import t
 
 
 class ManeDownloadWorker(QThread):
@@ -42,7 +43,7 @@ class ManeDownloadWorker(QThread):
 class ManeDownloadDialog(QDialog):
     def __init__(self, parent=None, dest_dir=None):
         super().__init__(parent)
-        self.setWindowTitle("Download MANE Select data")
+        self.setWindowTitle(t("Download MANE Select data"))
         self.resize(520, 180)
         self._worker = None
         self._result_path = None
@@ -51,17 +52,15 @@ class ManeDownloadDialog(QDialog):
         layout = QVBoxLayout(self)
 
         note = QLabel(
-            "Downloads the current NCBI MANE Select summary file (~1 MB) -- the exact "
-            "filename is discovered from NCBI's own directory listing rather than "
-            "hardcoded, so this always gets the latest version. Used to prefer the "
-            "canonical transcript when a variant overlaps several during SnpEff "
-            "annotation; optional otherwise."
+            t("Downloads the current NCBI MANE Select summary file (about 1 MB); the latest version is located "
+              "automatically in NCBI's directory listing. It is used to prefer the canonical transcript when a variant "
+              "overlaps several transcripts during SnpEff annotation; it is otherwise optional.")
         )
         note.setWordWrap(True)
         layout.addWidget(note)
 
         dest_row = QHBoxLayout()
-        dest_row.addWidget(QLabel("Save to:"))
+        dest_row.addWidget(QLabel(t("Save to:")))
         dest_row.addWidget(QLabel(self.dest_dir))
         dest_row.addStretch(1)
         layout.addLayout(dest_row)
@@ -74,17 +73,17 @@ class ManeDownloadDialog(QDialog):
 
         button_row = QHBoxLayout()
         button_row.addStretch(1)
-        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button = QPushButton(t("Cancel"))
         self.cancel_button.clicked.connect(self.reject)
         button_row.addWidget(self.cancel_button)
-        self.download_button = QPushButton("Download")
+        self.download_button = QPushButton(t("Download"))
         self.download_button.clicked.connect(self._on_download_clicked)
         button_row.addWidget(self.download_button)
         layout.addLayout(button_row)
 
     def _on_download_clicked(self):
         self.download_button.setEnabled(False)
-        self.status_label.setText("Downloading...")
+        self.status_label.setText(t("Downloading..."))
         self.progress_bar.setRange(0, 0)
 
         self._worker = ManeDownloadWorker(self.dest_dir, self)
@@ -97,8 +96,8 @@ class ManeDownloadDialog(QDialog):
         self._worker = None
         self.progress_bar.setRange(0, 1)
         self.progress_bar.setValue(1)
-        self.status_label.setText(f"Done: {path}")
-        QMessageBox.information(self, "MANE Select data ready", f"Downloaded:\n{path}")
+        self.status_label.setText(t("Done: {path}", path=path))
+        QMessageBox.information(self, t("MANE Select data ready"), t("Downloaded:\n{path}", path=path))
         self.accept()
 
     def _on_failed(self, message):
@@ -106,8 +105,8 @@ class ManeDownloadDialog(QDialog):
         self.download_button.setEnabled(True)
         self.progress_bar.setRange(0, 1)
         self.progress_bar.setValue(0)
-        self.status_label.setText("Failed.")
-        QMessageBox.critical(self, "Download failed", message)
+        self.status_label.setText(t("Failed."))
+        QMessageBox.critical(self, t("Download failed"), message)
 
     def result_path(self):
         return self._result_path

@@ -1,0 +1,84 @@
+gene	new_tab_rule	new_tab_canonical	vcf_tab_mane_in_snpeff	comparison
+PRAMEF10	none (no NM_ at this locus)		NM_001039361.4	differs: VCF tab picks MANE NM_001039361.4, new tab none
+PRAMEF5	none (no NM_ at this locus)		NM_001013407.5	differs: VCF tab picks MANE NM_001013407.5, new tab none
+PRAMEF8	none (no NM_ at this locus)		NM_001012276.3	differs: VCF tab picks MANE NM_001012276.3, new tab none
+PRAMEF18	none (no NM_ at this locus)		NM_001099850.2	differs: VCF tab picks MANE NM_001099850.2, new tab none
+NBPF1	MANE Select	NM_001405666.3		differs: SnpEff GRCh37.p13 lacks this MANE accession (VCF tab picks per variant)
+LUZP1	MANE Select	NM_001395462.2	NM_001395462.1	same transcript, other version
+FAM73A	MANE Select	NM_001416120.1		differs: SnpEff GRCh37.p13 lacks this MANE accession (VCF tab picks per variant)
+PPIAL4G	none (no NM_ at this locus)		NM_001123068.3	differs: VCF tab picks MANE NM_001123068.3, new tab none
+NBPF14	none (no NM_ at this locus)		NM_001395631.1	differs: VCF tab picks MANE NM_001395631.1, new tab none
+NBPF20	MANE Select	NM_001405520.1	NM_001397211.1	differs: SnpEff GRCh37.p13 lacks this MANE accession (VCF tab picks per variant)
+NUP210L	MANE Select	NM_207308.3	NM_207308.2	same transcript, other version
+RHBG	longest CDS (no MANE Select at this locus)	NM_001412175.1	NM_020407.5	differs: VCF tab picks MANE NM_020407.5, new tab longest CDS (no MANE Select at this locus)
+FMO2	longest CDS (no MANE Select at this locus)	NM_001426376.1	NM_001460.5	differs: VCF tab picks MANE NM_001460.5, new tab longest CDS (no MANE Select at this locus)
+OR14A2	MANE Select	NM_001355292.3	NM_001355292.2	same transcript, other version
+OR14I1	MANE Select	NM_001004734.4	NM_001004734.2	same transcript, other version
+TMEM247	MANE Select	NM_001424184.1		differs: SnpEff GRCh37.p13 lacks this MANE accession (VCF tab picks per variant)
+PBRM1	MANE Select	NM_001405607.1		differs: SnpEff GRCh37.p13 lacks this MANE accession (VCF tab picks per variant)
+RYBP	MANE Select	NM_012234.7	NM_012234.6	same transcript, other version
+PLCXD2	MANE Select	NM_001413064.1		differs: SnpEff GRCh37.p13 lacks this MANE accession (VCF tab picks per variant)
+C4orf50	MANE Select	NM_001364689.3	NM_001364689.2	same transcript, other version
+TRIM61	MANE Select	NM_001414904.1		differs: SnpEff GRCh37.p13 lacks this MANE accession (VCF tab picks per variant)
+FAM153A	MANE Select	NM_001413826.1		differs: SnpEff GRCh37.p13 lacks this MANE accession (VCF tab picks per variant)
+OR4F3	MANE Select	NM_001408386.1		differs: SnpEff GRCh37.p13 lacks this MANE accession (VCF tab picks per variant)
+SLC35B3	MANE Select	NM_001370479.2	NM_001370479.1	same transcript, other version
+ATAT1	MANE Select	NM_001413067.1		differs: SnpEff GRCh37.p13 lacks this MANE accession (VCF tab picks per variant)
+HLA-DPA1	MANE Select	NM_033554.4	NM_033554.3	same transcript, other version
+GSTA5	MANE Select	NM_153699.3	NM_153699.2	same transcript, other version
+ZNF117	MANE Select	NM_015852.5	NM_015852.4	same transcript, other version
+TYW1B	longest CDS (no MANE Select at this locus)	NM_001412179.1	NM_001145440.3	differs: VCF tab picks MANE NM_001145440.3, new tab longest CDS (no MANE Select at this locus)
+ZAN	none (no NM_ at this locus)		NM_003386.3	differs: VCF tab picks MANE NM_003386.3, new tab none
+UFSP1	MANE Select	NM_001430944.2		differs: SnpEff GRCh37.p13 lacks this MANE accession (VCF tab picks per variant)
+RGS20	MANE Select	NM_003702.5	NM_003702.4	same transcript, other version
+FABP12	MANE Select	NM_001105281.6	NM_001105281.5	same transcript, other version
+BOP1	none (no NM_ at this locus)		NM_015201.5	differs: VCF tab picks MANE NM_015201.5, new tab none
+CNTNAP3B	none (no NM_ at this locus)		NM_001201380.3	differs: VCF tab picks MANE NM_001201380.3, new tab none
+ASPN	MANE Select	NM_017680.6	NM_017680.5	same transcript, other version
+TXNDC8	MANE Select	NM_001424031.1		differs: SnpEff GRCh37.p13 lacks this MANE accession (VCF tab picks per variant)
+OR1B1	MANE Select	NM_001004450.3	NM_001004450.2	same transcript, other version
+MUC2	MANE Select	NM_002457.5	NM_002457.4	same transcript, other version
+OR52I2	MANE Select	NM_001405760.1		differs: SnpEff GRCh37.p13 lacks this MANE accession (VCF tab picks per variant)
+OR4P4	MANE Select	NM_001405919.1		differs: SnpEff GRCh37.p13 lacks this MANE accession (VCF tab picks per variant)
+OR1S1	MANE Select	NM_001004458.4	NM_001004458.2	same transcript, other version
+FOLR3	longest CDS (no MANE Select at this locus)	NM_001412270.1	NM_000804.4	differs: VCF tab picks MANE NM_000804.4, new tab longest CDS (no MANE Select at this locus)
+OR2AT4	MANE Select	NM_001405852.1		differs: SnpEff GRCh37.p13 lacks this MANE accession (VCF tab picks per variant)
+HEPN1	MANE Select	NM_001037558.4		differs: SnpEff GRCh37.p13 lacks this MANE accession (VCF tab picks per variant)
+ORAI1	MANE Select	NM_032790.4	NM_032790.3	same transcript, other version
+C1QTNF9B	MANE Select	NM_001007537.3	NM_001007537.2	same transcript, other version
+CCNA1	MANE Select	NM_001413923.1		differs: SnpEff GRCh37.p13 lacks this MANE accession (VCF tab picks per variant)
+OR4Q3	MANE Select	NM_001405963.1		differs: SnpEff GRCh37.p13 lacks this MANE accession (VCF tab picks per variant)
+RNASE10	MANE Select	NM_001386206.3	NM_001386206.2	same transcript, other version
+RNASE9	MANE Select	NM_001110356.2	NM_001110356.1	same transcript, other version
+IL25	MANE Select	NM_172314.2	NM_172314.1	same transcript, other version
+IFI27	MANE Select	NM_001130080.3		differs: SnpEff GRCh37.p13 lacks this MANE accession (VCF tab picks per variant)
+DIO3	MANE Select	NM_001362.4	NM_001362.3	same transcript, other version
+TMEM266	MANE Select	NM_152335.5	NM_152335.3	same transcript, other version
+RPS17	none (no NM_ at this locus)		NM_001021.6	differs: VCF tab picks MANE NM_001021.6, new tab none
+TPSB2	none (no NM_ at this locus)		NM_024164.6	differs: VCF tab picks MANE NM_024164.6, new tab none
+ZNF598	MANE Select	NM_178167.5	NM_178167.4	same transcript, other version
+OR1F1	MANE Select	NM_001370640.6	NM_001370640.3	same transcript, other version
+AC138969.4	MANE Select	NM_001423836.2		differs: SnpEff GRCh37.p13 lacks this MANE accession (VCF tab picks per variant)
+NPIPB9	MANE Select	NM_001287250.3	NM_001287250.2	same transcript, other version
+OR3A2	MANE Select	NM_002551.5	NM_002551.4	same transcript, other version
+TBC1D3D	MANE Select	NM_001291465.2		differs: SnpEff GRCh37.p13 lacks this MANE accession (VCF tab picks per variant)
+TBC1D3I	MANE Select	NM_001291465.2	NM_001291463.2	differs: SnpEff GRCh37.p13 lacks this MANE accession (VCF tab picks per variant)
+CCL3L1	MANE Select	NM_021006.6	NM_021006.5	same transcript, other version
+CCL4L2	none (no NM_ at this locus)		NM_001291468.2	differs: VCF tab picks MANE NM_001291468.2, new tab none
+SERPINB11	longest CDS (no MANE Select at this locus)	NM_001426565.1	NM_001370475.1	differs: VCF tab picks MANE NM_001370475.1, new tab longest CDS (no MANE Select at this locus)
+TGFBR3L	MANE Select	NM_001419781.1		differs: SnpEff GRCh37.p13 lacks this MANE accession (VCF tab picks per variant)
+MUC16	MANE Select	NM_001401501.2	NM_001401501.1	same transcript, other version
+ZGLP1	MANE Select	NM_001409033.1		differs: SnpEff GRCh37.p13 lacks this MANE accession (VCF tab picks per variant)
+NFKBID	MANE Select	NM_139239.5	NM_139239.3	same transcript, other version
+FCGBP	MANE Select	NM_003890.3	NM_003890.2	same transcript, other version
+CEACAM18	MANE Select	NM_001405061.1		differs: SnpEff GRCh37.p13 lacks this MANE accession (VCF tab picks per variant)
+KIR3DL1	MANE Select	NM_013289.4	NM_013289.3	same transcript, other version
+NLRP7	MANE Select	NM_001127255.2	NM_001127255.1	same transcript, other version
+ARHGAP40	MANE Select	NM_001164431.3	NM_001164431.2	same transcript, other version
+KRTAP6-3	MANE Select	NM_001433434.1		differs: SnpEff GRCh37.p13 lacks this MANE accession (VCF tab picks per variant)
+GSTT1	MANE Select	NM_000853.4	NM_000853.3	same transcript, other version
+RGAG4	MANE Select	NM_001405151.1		differs: SnpEff GRCh37.p13 lacks this MANE accession (VCF tab picks per variant)
+TCP11X2	MANE Select	NM_001405027.1		differs: SnpEff GRCh37.p13 lacks this MANE accession (VCF tab picks per variant)
+NKRF	MANE Select	NM_001417890.1		differs: SnpEff GRCh37.p13 lacks this MANE accession (VCF tab picks per variant)
+SPANXC	none (no NM_ at this locus)		NM_022661.4	differs: VCF tab picks MANE NM_022661.4, new tab none
+TEX28	none (no NM_ at this locus)		NM_001586.3	differs: VCF tab picks MANE NM_001586.3, new tab none

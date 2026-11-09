@@ -1,0 +1,37 @@
+﻿SpliceAI Variant Scoring - kurmadan önce lütfen okuyun
+
+BU KURULUM NELERİ KURAR
+
+Bu kurulum, SpliceAI Variant Scoring'i ve kullandığı araçları içerir:
+  - GRCh37 ve GRCh38 RefSeq veritabanlarıyla SnpEff (MIT Lisansı)
+  - Yalnızca SnpEff'i çalıştırmak için kullanılan Eclipse Temurin 21 Java
+    çalışma ortamı (Classpath Exception ile GPLv2)
+  - NCBI MANE Select özet verisi (kamu malı, NCBI)
+  - Yalnızca bu programın kullandığı Microsoft Visual C++ çalışma dosyaları
+
+SPLICEAI'NİN KENDİSİ DAHİL DEĞİLDİR
+
+SpliceAI'yi Illumina, Inc. geliştirir. Kurulum sırasında Setup, resmi
+SpliceAI 1.3.1 paketini yayımlandığı yer olan Python Package Index'ten
+(pypi.org) doğrudan indirir ve dosyanın yayımlananın tıpatıp aynısı olduğunu
+doğrular. Bunun için yalnızca kurulum sırasında, bir kez internet bağlantısı
+gerekir.
+
+SpliceAI, Illumina, Inc. tarafından şu lisanslarla sunulur:
+  - kaynak kod: PolyForm Strict License 1.0.0
+  - eğitilmiş modeller: Creative Commons BY-NC 4.0
+İkisi de yalnızca akademik ve ticari olmayan kullanıma izin verir. Devam
+ederek SpliceAI kullanımınızın bu koşullara uygun olduğunu onaylamış
+olursunuz. Ticari kullanım için Illumina'dan lisans gerekir
+(AI_licensing@illumina.com).
+
+KULLANIM KOŞULLARI
+
+Bu yazılım yalnızca akademik ve araştırma amaçlı kullanım için, açık ya da
+örtük hiçbir garanti olmaksızın sunulmaktadır. Tanı aracı değildir; çıktısı,
+yetkin kişilerce bağımsız olarak doğrulanmadan klinik karar vermede
+kullanılmamalıdır. Geliştirici, bu yazılımın herhangi bir kullanımından ya da
+çıktısına güvenilmesinden doğan hiçbir sorumluluk kabul etmez.
+
+Üçüncü taraf lisanslarının tam metinleri programın içindedir (başlangıç
+ekranında "Lisansın tamamını oku...").

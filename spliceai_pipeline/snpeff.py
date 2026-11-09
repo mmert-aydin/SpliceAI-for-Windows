@@ -42,8 +42,12 @@ from .control import RunCancelled
 
 # Default install root: a "snpeff" folder next to the app (see
 # app_paths.app_root_dir()); the jar and databases live in its "snpEff"
-# subfolder (see snpeff_jar_path()).
+# subfolder (see snpeff_jar_path()). From source, fetch-thirdparty.ps1's copy if
+# there is no such folder, so a fresh checkout annotates as an install does.
 DEFAULT_SNPEFF_DIR = os.path.join(app_root_dir(), "snpeff")
+_FROM_SOURCE = os.path.join(app_root_dir(), "installer", "thirdparty", "snpeff")
+if not getattr(sys, "frozen", False) and not os.path.isdir(DEFAULT_SNPEFF_DIR) and os.path.isdir(_FROM_SOURCE):
+    DEFAULT_SNPEFF_DIR = _FROM_SOURCE
 
 # Oldest Java major version SnpEff will run on. find_java() skips anything
 # older -- e.g. a Java 8 install that shadows a newer JDK on PATH -- instead
@@ -391,7 +395,7 @@ def _gene_annotations(info_field, mane_select):
 
 
 def run_snpeff_annotation(variants, build, snpeff_dir=None, java_exe=None, mane_dir=None, on_progress=None,
-                          should_cancel=None):
+                          should_cancel=None, use_mane=True):
     """variants: iterable of (chrom, pos, ref, alt) tuples (normalized
     representation, deduplicated by the caller if needed).
     snpeff_dir: install root (see module docstring); defaults to
@@ -402,6 +406,7 @@ def run_snpeff_annotation(variants, build, snpeff_dir=None, java_exe=None, mane_
     found, canonical-transcript selection just skips the MANE-preference step
     and falls back to curated-over-predicted -- this is a soft dependency, not
     a hard requirement, same philosophy as SnpEff itself being optional.
+    use_mane: False skips that step on purpose (the VCF tab's MANE Select box).
 
     Returns {(chrom, pos, ref, alt): {gene_name: (transcript_id, hgvs_c), ...,
     None: (transcript_id, hgvs_c)}} -- one pick per annotated gene plus the
@@ -426,10 +431,12 @@ def run_snpeff_annotation(variants, build, snpeff_dir=None, java_exe=None, mane_
     java_exe = java_exe or find_java(snpeff_dir)
 
     from .mane import load_cached_mane_select
-    mane_select = load_cached_mane_select(mane_dir)
+    mane_select = load_cached_mane_select(mane_dir) if use_mane else {}
     progress(
         f"Using MANE Select data ({len(mane_select)} genes) for canonical transcript preference."
         if mane_select else
+        "MANE Select is off -- canonical transcript preference is curated-over-predicted only."
+        if not use_mane else
         "No MANE Select data found -- canonical transcript preference will fall back to curated-over-predicted only."
     )
 

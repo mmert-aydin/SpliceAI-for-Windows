@@ -9,27 +9,18 @@ from PySide6.QtCore import QThread, Signal
 from spliceai_pipeline.cli import ReferenceMismatchError, run_pipeline_core
 from spliceai_pipeline.control import RunCancelled, RunControl
 
-from .spliceai_setup import display_install_command, is_frozen
 
 
 def _spliceai_missing_message():
-    """What to tell a user whose run needed SpliceAI. The installed app needs
-    no Python or command line for it (see spliceai_setup.install_spliceai_wheel),
-    so only a source checkout is shown a pip command."""
-    if is_frozen():
-        how = (
-            'Click the red "SpliceAI not installed" button at the top of the window, then '
-            '"Download and install" (needs an internet connection once) or "Install from file...".'
-        )
-    else:
-        how = (
-            f"Install it with:\n{display_install_command()}\n\n"
-            "See the SpliceAI status button in the top bar for details and an automatic-install option."
-        )
-    return (
-        "SpliceAI isn't installed, so this run couldn't complete live scoring "
-        "(any variant not already covered by precomputed data).\n\n" + how
-    )
+    """What to tell a user whose run needed SpliceAI: no Python or command line
+    for it (see spliceai_setup.install_spliceai_wheel)."""
+    from .i18n import t
+
+    return t("SpliceAI is not installed, so live scoring could not be completed in this run (variants not covered by "
+             "precomputed data).\n"
+             "\n"
+             "To install it, click the red \"SpliceAI not installed\" button at the top of the window, then \"Download "
+             "and install\" (an internet connection is needed once) or \"Install from file...\".")
 
 
 SPLICEAI_MISSING_MESSAGE = _spliceai_missing_message()
@@ -42,7 +33,7 @@ class PipelineWorker(QThread):
     cancelled = Signal()
 
     def __init__(self, vcf_path, build, mode, fasta_path, precomputed_dir, skip_precomputed,
-                 use_snpeff=False, snpeff_dir=None, mane_dir=None, parent=None):
+                 use_snpeff=False, snpeff_dir=None, mane_dir=None, use_mane=True, genes=None, parent=None):
         super().__init__(parent)
         self.vcf_path = vcf_path
         self.build = build
@@ -53,6 +44,8 @@ class PipelineWorker(QThread):
         self.use_snpeff = use_snpeff
         self.snpeff_dir = snpeff_dir
         self.mane_dir = mane_dir
+        self.use_mane = use_mane
+        self.genes = genes
         # The GUI's Pause/End buttons (see spliceai_pipeline.control).
         self.control = RunControl()
 
@@ -77,8 +70,10 @@ class PipelineWorker(QThread):
                 use_snpeff=self.use_snpeff,
                 snpeff_dir=self.snpeff_dir or None,
                 mane_dir=self.mane_dir or None,
+                use_mane=self.use_mane,
                 on_progress=on_progress,
                 control=self.control,
+                genes=self.genes,
             )
             self.finished_ok.emit(rows)
         except RunCancelled:

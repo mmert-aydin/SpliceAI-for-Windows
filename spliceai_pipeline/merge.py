@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 
-@dataclass
+@dataclass(slots=True)  # WGS results hold millions of these
 class ScoreRow:
     chrom: str
     pos: int
@@ -26,6 +26,8 @@ class ScoreRow:
     # transcript came from: "Intron 5/26", "Exon 3/27", "5' UTR", "Intergenic".
     snpeff_region: Optional[str] = None
     allele_fraction: Optional[float] = None
+    # The first sample's genotype for this ALT: "het", "hom" or "hemi" (vcfio.zygosities).
+    zygosity: Optional[str] = None
 
     @property
     def variant_id(self):
@@ -98,7 +100,7 @@ def _snpeff_for_gene(snpeff_ann, gene, n_genes):
 
 
 def merge_variant(chrom, pos, ref, alt, precomputed_annotations, live_annotations, snpeff_ann=None,
-                  allele_fraction=None, skip_reason=None):
+                  allele_fraction=None, skip_reason=None, zygosity=None):
     """precomputed_annotations: list[str] if found in the precomputed file, else None.
     live_annotations: list[str] if live scoring was run for this variant, else None
     (note: an empty list means live scoring ran but found no overlapping gene).
@@ -110,6 +112,7 @@ def merge_variant(chrom, pos, ref, alt, precomputed_annotations, live_annotation
     allele_fraction: optional float, stamped onto every row the same way as
     snpeff_ann -- it's a property of the input variant call itself (from the
     VCF's own AF/AD), not of which gene/source produced a given row.
+    zygosity: likewise, from the VCF's GT.
 
     A variant found in the precomputed data still gets live-scored too whenever
     skip_precomputed is off (the default -- see cli.py), specifically so the two
@@ -149,7 +152,7 @@ def merge_variant(chrom, pos, ref, alt, precomputed_annotations, live_annotation
                 # that has no region still merges.
                 row.snpeff_transcript, row.snpeff_hgvs_c = picked[0], picked[1]
                 row.snpeff_region = picked[2] if len(picked) > 2 else None
-    if allele_fraction is not None:
-        for row in rows:
-            row.allele_fraction = allele_fraction
+    for row in rows:
+        row.allele_fraction = allele_fraction
+        row.zygosity = zygosity
     return rows

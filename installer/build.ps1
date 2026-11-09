@@ -16,10 +16,10 @@
   Java, MANE, VC++ runtime DLLs into installer\thirdparty).
 
 .EXAMPLE
-  powershell -ExecutionPolicy Bypass -File installer\build.ps1 -Version 1.1.1
+  powershell -ExecutionPolicy Bypass -File installer\build.ps1 -Version 1.2.0
 #>
 param(
-    [string]$Version = "1.1.1",
+    [string]$Version = "1.2.0",
     # Reuse the last PyInstaller output (only re-compile the installer).
     [switch]$SkipAppBuild
 )
@@ -49,15 +49,42 @@ $required = "vcruntime\msvcp140_1.dll", "java", "snpeff\snpEff\snpEff.jar",
 foreach ($p in $required) {
     if (-not (Test-Path (Join-Path $third $p))) { throw "Missing installer\thirdparty\$p -- run installer\fetch-thirdparty.ps1 first." }
 }
+# Bundled from the repository itself by the .spec.
+$tracked = "refseq\hg19.ncbiRefSeqCurated.txt.gz", "refseq\hg38.ncbiRefSeqCurated.txt.gz",
+           "spliceai_pipeline\data\wt_concordance_hg19.tsv.gz", "spliceai_pipeline\data\wt_concordance_hg38.tsv.gz",
+           "validation-sets\validation-set-hg19.h5", "validation-sets\validation-set-hg38.h5"
+foreach ($p in $tracked) {
+    if (-not (Test-Path (Join-Path $repo $p))) { throw "Missing $p -- it is part of the repository; check out the full tree." }
+}
 
 # --- 1. build venv ---------------------------------------------------------
+# parasail (spliceai_pipeline/align.py) goes in from its pinned wheel, checked
+# by SHA-256, before requirements.txt (which then finds it already there).
+$ParasailWheel = "parasail-1.3.4-py2.py3-none-win_amd64.whl"
+$ParasailUrl = "https://files.pythonhosted.org/packages/7d/3d/3fb505271ca157798326c3f4c357ccde2c1c6f05f05400aa19e3e55bbd01/$ParasailWheel"
+$ParasailSha256 = "25B8260B922933C8E7E8CE008DDCBBFF4EF998B7D077169ED441D70AB7A78B5A"
+function Install-Parasail {
+    & $venvPy -c "import importlib.metadata as m, sys; sys.exit(0 if m.version('parasail') == '1.3.4' else 1)" 2>$null
+    if ($LASTEXITCODE -eq 0) { return }
+    $file = Join-Path ([IO.Path]::GetTempPath()) $ParasailWheel
+    Invoke-WebRequest -UseBasicParsing $ParasailUrl -OutFile $file
+    $actual = (Get-FileHash $file -Algorithm SHA256).Hash
+    if ($actual -ne $ParasailSha256) { throw "$ParasailWheel has SHA-256 $actual, expected $ParasailSha256." }
+    & $venvPy -m pip install --no-deps --no-index $file; Assert-Exit "pip install parasail"
+}
 if (-not (Test-Path $venvPy)) {
     Step "Creating build venv (.venv)"
     py -3.13 -m venv (Join-Path $repo ".venv"); Assert-Exit "venv"
+    Install-Parasail
     & $venvPy -m pip install -r (Join-Path $repo "requirements.txt") -r (Join-Path $repo "requirements-build.txt"); Assert-Exit "pip install"
 }
+Install-Parasail
 & $venvPy -c "import importlib.util, sys; sys.exit(1 if importlib.util.find_spec('spliceai') else 0)"
-if ($LASTEXITCODE -ne 0) { throw "spliceai is installed in .venv -- uninstall it; it must never be bundled into the build." }
+if ($LASTEXITCODE -ne 0) {
+    throw ("SpliceAI is installed in .venv. Remove it with: .venv\Scripts\python -m pip uninstall -y spliceai`n" +
+           "Why: SpliceAI's license forbids redistributing it, and PyInstaller would pack any copy it finds in .venv into the build. " +
+           "The program doesn't need that copy, from source either: it finds SpliceAI in %USERPROFILE%\.spliceai_gui\python-packages.")
+}
 
 # --- 2. app ----------------------------------------------------------------
 Push-Location $repo

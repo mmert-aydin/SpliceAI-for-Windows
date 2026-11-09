@@ -1,7 +1,8 @@
 """Results table model: displays merge.ScoreRow objects with proper numeric
 sorting and combined gene-search + score-threshold filtering.
 """
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel, Qt
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, QRectF, Qt
+from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 
 from . import theme
 
@@ -24,6 +25,7 @@ MONO_COLUMNS = {
 # where they are left is remembered (config "column_order").
 COLUMNS = [
     ("Gene", "gene", "str"),
+    ("Zygosity", "zygosity", "str"),
     ("Transcript", "snpeff_transcript", "str"),
     ("Variant Id", "variant_id", "str"),
     ("Region", "snpeff_region", "str"),
@@ -63,6 +65,11 @@ MAX_SCORE_COLUMN = _column_index("max_score")
 # Header tooltips, keyed by ScoreRow attribute name; columns not listed here
 # get no tooltip.
 COLUMN_TOOLTIPS = {
+    "zygosity": (
+        "The genotype of the VCF's first sample for this ALT allele, from its GT field: "
+        "Het (one copy), Hom (both copies: no WT transcript expected from this locus) or "
+        "Hemi (a single-copy call carrying it, e.g. chrX in a male). Blank if the VCF has no GT."
+    ),
     "snpeff_region": (
         "Where in the gene the variant falls, from SnpEff, for the same transcript shown in "
         "the Transcript column: \"Intron 5/26\" is the 5th of 26 introns, \"Exon 3/27\" the 3rd "
@@ -76,6 +83,42 @@ COLUMN_TOOLTIPS = {
         "that's present instead. Blank if the VCF has neither."
     ),
 }
+
+
+# vcfio.zygosities()' codes -> (label, filled dots, dots drawn, meaning)
+ZYGOSITY = {
+    "het": ("Het", 1, 2, "Heterozygous: one copy of this ALT"),
+    "hom": ("Hom", 2, 2, "Homozygous: both copies carry this ALT"),
+    "hemi": ("Hemi", 1, 1, "Hemizygous: a single-copy call carrying this ALT"),
+}
+_ICONS = {}
+
+
+def zygosity_icon(code):
+    """Two dots for the two copies of the locus, filled where the ALT is: Hom
+    both, Het one, Hemi a single dot. Drawn, not a file, so it's sharp at any
+    display scaling."""
+    if code not in ZYGOSITY:
+        return None
+    if code not in _ICONS:
+        _, filled, drawn, _ = ZYGOSITY[code]
+        icon = QIcon()
+        for scale in (1, 2):
+            pm = QPixmap(22 * scale, 12 * scale)
+            pm.fill(Qt.transparent)
+            p = QPainter(pm)
+            p.setRenderHint(QPainter.Antialiasing, True)
+            p.scale(scale, scale)
+            color = QColor(theme.TEAL)
+            p.setPen(QPen(color, 1.4))
+            for i in range(drawn):
+                p.setBrush(color if i < filled else Qt.NoBrush)
+                p.drawEllipse(QRectF(1.5 + i * 10, 1.5, 9, 9))
+            p.end()
+            pm.setDevicePixelRatio(scale)
+            icon.addPixmap(pm)
+        _ICONS[code] = icon
+    return _ICONS[code]
 
 
 def sort_key_value(row, attr, kind):
@@ -121,6 +164,14 @@ class ScoreTableModel(QAbstractTableModel):
         _, attr, kind = COLUMNS[index.column()]
         value = getattr(row, attr)
 
+        if attr == "zygosity":
+            if role == Qt.DisplayRole:
+                return ZYGOSITY[value][0] if value in ZYGOSITY else (value or "")
+            if role == Qt.DecorationRole:
+                return zygosity_icon(value)
+            if role == Qt.ToolTipRole and value in ZYGOSITY:
+                return ZYGOSITY[value][3]
+
         if role == Qt.DisplayRole:
             if value is None:
                 return ""
@@ -143,33 +194,35 @@ class ScoreTableModel(QAbstractTableModel):
         return self._rows[row_index]
 
 
-class ScoreFilterProxyModel(QSortFilterProxyModel):
-    """Combines a gene-name substring search with a max_score >= threshold filter.
+class ScoreFilterProxyModel:
+    """Combines a gene-name substring search with a max_score >= threshold filter
+    over a ScoreTableModel's rows, keeping the source order.
 
-    Deliberately filter-only -- sorting is NOT done through this proxy's own
-    sort()/lessThan() mechanism. QSortFilterProxyModel's built-in sort requires
-    one Python-level lessThan() callback per comparison (~n*log(n) of them),
-    and with dynamicSortFilter (Qt's default), every later filter change
-    re-triggers that full re-sort too. Profiled at ~2 million lessThan() calls
-    and >30s for a single filter-clear on a ~121k-row result set with a sort
-    active -- consistently too slow for interactive use, no matter how cheap
-    each callback body is, purely from the number of Python/C++ round-trips.
+    Plain Python, not a QSortFilterProxyModel: that one calls a Python
+    filterAcceptsRow() once per source row and, after invalidateFilter(),
+    emits a rowsRemoved/rowsInserted pair per changed range -- on a WGS result
+    (millions of rows) adding one gene froze the window for minutes. Here a
+    filter change is one list comprehension, and the gene test is decided once
+    per distinct gene name (tens of thousands) rather than once per row.
+    on_changed is called exactly once per change.
 
-    Instead, main_window pre-sorts the full row list directly in Python (see
-    table_model.sort_key_value + main_window._on_sort_indicator_changed) --
-    a single native Timsort pass, no per-comparison callback overhead -- and
-    this proxy is kept permanently at sort column -1 (see
-    main_window._build_results_group's `self.proxy_model.sort(-1)`), so it
-    only ever filters; filtering an already-sorted source preserves that
-    order for free, with no lessThan() calls at all.
+    Sorting is done by main_window on the full row list (see
+    main_window._on_sort_indicator_changed); filtering keeps that order.
     """
 
-    def __init__(self, parent=None):
-        super().__init__(parent)
+    def __init__(self, source_model, on_changed=None):
+        self._source = source_model
+        self._on_changed = on_changed
         self._quick_genes = []
         self._threshold = None
         self._gene_set = None
-        self.setSortRole(SORT_ROLE)
+        self._genes = set()
+        self._rows = []
+        source_model.modelReset.connect(self._on_source_reset)
+
+    def _on_source_reset(self):
+        self._genes = {r.gene or "" for r in self._source._rows}
+        self.refilter()
 
     def set_quick_gene_filters(self, genes):
         """genes: iterable of gene-name substrings the user added one at a time via the
@@ -177,34 +230,37 @@ class ScoreFilterProxyModel(QSortFilterProxyModel):
         any of them), or empty/None to clear. Independent of set_gene_set()'s bulk exact-match
         import list; the two combine with AND, consistent with how threshold combines with both."""
         self._quick_genes = [g.strip().lower() for g in genes if g and g.strip()] if genes else []
-        self.invalidateFilter()
+        self.refilter()
 
     def set_threshold(self, threshold):
         """threshold: float or None to clear."""
         self._threshold = threshold
-        self.invalidateFilter()
+        self.refilter()
 
     def set_gene_set(self, genes):
         """genes: iterable of exact gene symbols (matches gene_reference's canonical
         casing, which is also the pipeline's own annotation casing), or None to clear."""
         self._gene_set = set(genes) if genes else None
-        self.invalidateFilter()
+        self.refilter()
 
-    def filterAcceptsRow(self, source_row, source_parent):
+    def refilter(self):
+        rows = self._source._rows
         if self._quick_genes or self._gene_set:
-            row = self.sourceModel().row_at(source_row)
-            gene_value = row.gene or ""
-            gene_value_lower = gene_value.lower()
-
-            if self._quick_genes and not any(g in gene_value_lower for g in self._quick_genes):
-                return False
-            if self._gene_set and gene_value not in self._gene_set:
-                return False
-
+            allowed = {
+                g for g in self._genes
+                if (not self._quick_genes or any(q in g.lower() for q in self._quick_genes))
+                and (not self._gene_set or g in self._gene_set)
+            }
+            rows = [r for r in rows if (r.gene or "") in allowed]
         if self._threshold is not None:
-            row = self.sourceModel().row_at(source_row)
-            score_value = row.max_score
-            if score_value is None or score_value < self._threshold:
-                return False
+            t = self._threshold
+            rows = [r for r in rows if r.max_score is not None and r.max_score >= t]
+        self._rows = rows
+        if self._on_changed:
+            self._on_changed()
 
-        return True
+    def rowCount(self):
+        return len(self._rows)
+
+    def row_at(self, row_index):
+        return self._rows[row_index]

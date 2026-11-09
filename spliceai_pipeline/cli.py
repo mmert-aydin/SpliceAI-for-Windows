@@ -27,6 +27,20 @@ MODES = ("raw", "masked")
 # checked against hg19).
 MAX_REF_MISMATCH_FRACTION = 0.10
 
+# A VCF record this far outside every chosen gene is dropped before it is
+# normalized; normalization only moves an indel left through a repeat, so the
+# exact test on the normalized position (SpliceAI's own) comes after.
+GENE_PREFILTER_MARGIN = 1000
+
+
+def read_gene_list(value):
+    """--genes: a text file of gene symbols (any separators), or the symbols
+    themselves separated by commas."""
+    import os
+    import re
+    text = open(value, encoding="utf-8-sig").read() if os.path.isfile(value) else value
+    return [t for t in re.split(r"[,;\s]+", text) if t]
+
 
 class ReferenceMismatchError(ValueError):
     """The VCF and the reference FASTA don't belong together -- wrong genome
@@ -100,6 +114,10 @@ def parse_args(argv=None):
                    help="Only live-score variants NOT found in the precomputed file. Default: live-score "
                         "everything, for QC/comparison against precomputed. Has no effect if "
                         "--precomputed-dir is omitted (everything is live-scored either way).")
+    p.add_argument("--genes", default=None,
+                   help="Score only variants inside these genes (SpliceAI's gene intervals): comma-separated "
+                        "symbols, or a text file listing them. Rows of other genes a variant overlaps are "
+                        "left out too. Default: every variant.")
     p.add_argument("-o", "--output", default=None,
                    help="Output table path (.csv or .tsv). Default: <vcf, extension stripped>-calculated.tsv")
     return p.parse_args(argv)
@@ -107,8 +125,12 @@ def parse_args(argv=None):
 
 def run_pipeline_core(vcf_path, build, mode, fasta_path, precomputed_dir=None, skip_precomputed=False,
                       use_snpeff=False, snpeff_dir=None, mane_dir=None,
-                      on_progress=None, control=None):
+                      on_progress=None, control=None, use_mane=True, genes=None):
     """Normalize -> lookup (if precomputed_dir given) -> live-score -> merge.
+
+    genes: optional gene symbols; then only variants inside those genes'
+    SpliceAI intervals are scored, and only those genes' rows are returned
+    (skipped variants inside them are kept as their placeholder rows).
 
     control: optional control.RunControl -- pause/end from the GUI, checked
     between variants; an ended run raises control.RunCancelled.
@@ -147,13 +169,31 @@ def run_pipeline_core(vcf_path, build, mode, fasta_path, precomputed_dir=None, s
     else:
         progress("No precomputed-data directory given -- every variant will be live-scored.")
 
+    regions = None
+    if genes:
+        from .transcripts import GeneRegions
+        regions = GeneRegions(build, genes)
+        if regions.unknown:
+            progress(f"  Not in SpliceAI's {build} gene table, so left out: {', '.join(regions.unknown)}")
+        if not regions.genes:
+            raise ValueError(f"None of the chosen genes is in SpliceAI's {build} gene table.")
+        progress(f"Scoring only variants inside {len(regions.genes)} chosen gene(s)")
+
     t0 = time.time()
     progress(f"Reading and normalizing variants from {vcf_path}")
     normalized = []
     contigs = set(fasta.keys())
-    for chrom, pos, ref, alts, allele_fractions in read_vcf_records(vcf_path):
+    n_records = 0
+    for chrom, pos, ref, alts, allele_fractions, zygosities in read_vcf_records(vcf_path):
         checkpoint()
-        normalized.extend(normalize_record(fasta, chrom, pos, ref, alts, allele_fractions, contigs=contigs))
+        n_records += 1
+        if regions is not None and not regions.contains(chrom, pos, GENE_PREFILTER_MARGIN):
+            continue
+        normalized.extend(normalize_record(fasta, chrom, pos, ref, alts, allele_fractions, contigs=contigs,
+                                           zygosities=zygosities))
+    if regions is not None:
+        normalized = [v for v in normalized if regions.contains(v.chrom, v.pos)]
+        progress(f"  {n_records} VCF record(s) read; {len(normalized)} variant allele(s) inside the chosen genes")
     phase_seconds["normalize"] = time.time() - t0
     progress(f"  {len(normalized)} variant alleles after splitting multi-allelic records")
     check_reference_fit(normalized, build, fasta_path, progress)
@@ -169,7 +209,7 @@ def run_pipeline_core(vcf_path, build, mode, fasta_path, precomputed_dir=None, s
         try:
             unique_variants = {(v.chrom, v.pos, v.ref, v.alt) for v in normalized if not v.skip_reason}
             snpeff_annotations = run_snpeff_annotation(
-                unique_variants, build, snpeff_dir=snpeff_dir, mane_dir=mane_dir,
+                unique_variants, build, snpeff_dir=snpeff_dir, mane_dir=mane_dir, use_mane=use_mane,
                 on_progress=lambda m: progress(f"  {m}"),
                 should_cancel=(lambda: control.cancelled) if control is not None else None,
             )
@@ -244,7 +284,10 @@ def run_pipeline_core(vcf_path, build, mode, fasta_path, precomputed_dir=None, s
         rows.extend(merge_variant(
             v.chrom, v.pos, v.ref, v.alt, precomputed_hits[i], live_results.get(i), snpeff_ann=snpeff_ann,
             allele_fraction=v.allele_fraction, skip_reason=v.skip_reason or skip_reasons.get(i),
+            zygosity=v.zygosity,
         ))
+    if regions is not None:
+        rows = [r for r in rows if not r.gene or r.gene in regions.genes]
     phase_seconds["merge"] = time.time() - t0
 
     total = sum(phase_seconds.values())
@@ -264,6 +307,7 @@ def run_pipeline(args):
         use_snpeff=args.use_snpeff,
         snpeff_dir=args.snpeff_dir,
         mane_dir=args.mane_dir,
+        genes=read_gene_list(args.genes) if args.genes else None,
     )
 
     print(f"Writing {len(rows)} rows to {out_path}", flush=True)

@@ -11,13 +11,13 @@ reads or cares how/whether this was ever opened.
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QTextEdit, QVBoxLayout
 
 from .assets_paths import LICENSE_THIRD_PARTY_PATH
+from .i18n import N_, t
 
-LICENSE_DIALOG_TITLE = "Third-Party Licenses -- SpliceAI Variant Scoring"
+LICENSE_DIALOG_TITLE = N_("Third-Party Licenses -- SpliceAI Variant Scoring")
 
-HEADER_HTML = (
-    "<b>Third-Party Licenses</b><br>Covers the licensing terms for SpliceAI, SnpEff, NCBI "
-    "MANE, and the UCSC reference genome -- none of which are bundled with this "
-    "application."
+HEADER_HTML = N_(
+    "<b>Third-Party Licenses</b><br>The license terms of SpliceAI, SnpEff, NCBI MANE and the UCSC reference "
+    "genome."
 )
 
 
@@ -41,13 +41,13 @@ def _load_license_text():
 class LicenseDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(LICENSE_DIALOG_TITLE)
+        self.setWindowTitle(t(LICENSE_DIALOG_TITLE))
         self.setModal(True)
         self.resize(760, 680)
 
         layout = QVBoxLayout(self)
 
-        header = QLabel(HEADER_HTML)
+        header = QLabel(t(HEADER_HTML))
         header.setWordWrap(True)
         layout.addWidget(header)
 
@@ -59,7 +59,7 @@ class LicenseDialog(QDialog):
 
         button_row = QHBoxLayout()
         button_row.addStretch(1)
-        self.close_button = QPushButton("Close")
+        self.close_button = QPushButton(t("Close"))
         self.close_button.setDefault(True)
         self.close_button.clicked.connect(self.accept)
         button_row.addWidget(self.close_button)

@@ -19,6 +19,58 @@ def _system_times():
     return idle.value, kernel.value + user.value  # kernel time includes idle time
 
 
+class _MemoryCounters(ctypes.Structure):
+    _fields_ = [("cb", ctypes.c_ulong), ("PageFaultCount", ctypes.c_ulong)] + [
+        (name, ctypes.c_size_t) for name in (
+            "PeakWorkingSetSize", "WorkingSetSize", "QuotaPeakPagedPoolUsage", "QuotaPagedPoolUsage",
+            "QuotaPeakNonPagedPoolUsage", "QuotaNonPagedPoolUsage", "PagefileUsage", "PeakPagefileUsage")]
+
+
+class ProcessMeter:
+    """CPU and RAM of another process (the database build): sample() gives
+    (cpu_percent of the whole processor, working set in bytes) since the
+    previous sample, both None off Windows or once the process is gone."""
+
+    def __init__(self, pid):
+        self.pid = pid
+        self._cpus = os.cpu_count() or 1
+        self._handle = None
+        if sys.platform == "win32":
+            # PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ
+            kernel32 = ctypes.windll.kernel32
+            kernel32.OpenProcess.restype = ctypes.c_void_p
+            self._handle = kernel32.OpenProcess(0x1000 | 0x0010, False, pid) or None
+        self._last = self._now()
+
+    def _now(self):
+        if not self._handle:
+            return None
+        times = [ctypes.c_ulonglong() for _ in range(4)]  # creation, exit, kernel, user (100 ns)
+        if not ctypes.windll.kernel32.GetProcessTimes(ctypes.c_void_p(self._handle), *map(ctypes.byref, times)):
+            return None
+        return time.monotonic(), (times[2].value + times[3].value) / 1e7
+
+    def sample(self):
+        now = self._now()
+        if now is None or self._last is None:
+            return None, None
+        (wall0, cpu0), (wall1, cpu1) = self._last, now
+        if wall1 - wall0 < 0.2:
+            return None, None
+        self._last = now
+        cpu = max(0.0, min(100.0, (cpu1 - cpu0) / ((wall1 - wall0) * self._cpus) * 100))
+        counters = _MemoryCounters()
+        counters.cb = ctypes.sizeof(counters)
+        ok = ctypes.windll.kernel32.K32GetProcessMemoryInfo(ctypes.c_void_p(self._handle), ctypes.byref(counters),
+                                                             counters.cb)
+        return cpu, (counters.WorkingSetSize if ok else None)
+
+    def close(self):
+        if self._handle:
+            ctypes.windll.kernel32.CloseHandle(ctypes.c_void_p(self._handle))
+            self._handle = None
+
+
 class CpuMeter:
     def __init__(self):
         self._cpus = os.cpu_count() or 1

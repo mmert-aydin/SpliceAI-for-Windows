@@ -1,0 +1,10 @@
+chrom	pos	ref	alt	gene	DS_AG	DP_AG	DS_AL	DP_AL	DS_DG	DP_DG	DS_DL	DP_DL	max_score	allele_fraction	source	snpeff_transcript	snpeff_hgvs_c	snpeff_region
+chr1	94011395	A	G	ABCA4	0.01	9	0.02	-10	0.0	-10	0.0	-20	0.02		live	NM_000350.3	c.5461-10T>C	Intron 38/49
+chr5	112827247	G	A	APC	0.0	0	0.0	-13	0.33	38	0.01	0	0.33		live	NM_000038.6	c.1548G>A	Exon 12/16
+chr5	112827247	G	A	CTC-554D6.1	0.0	0	0.0	-13	0.45	38	0.46	0	0.46		live			
+chr7	117639961	C	T	CFTR	0.0	-11	0.0	36	0.16	-2	0.0	36	0.16		live	NM_000492.4	c.3718-2477C>T	Intron 22/26
+chr10	27038070	T	C	ANKRD26	0.29	12	0.03	-16	0.0	5	0.0	-45	0.29		live	NM_014915.3	c.2376-16A>G	Intron 21/33
+chr11	47343158	C	T	MYBPC3	0.98	-2	0.4	-13	0.0	-12	0.0	-41	0.98		live	NM_000256.3	c.1227-13G>A	Intron 14/34
+chr11	108309110	A	G	ATM	0.0	-5	0.0	30	0.44	-5	0.0	-30	0.44		live	NM_000051.4	c.5763-1050A>G	Intron 38/62
+chr13	32370955	G	A	BRCA2	0.37	13	0.92	1	0.0	-12	0.0	1	0.92		live	NM_000059.4	c.8488-1G>A	Intron 19/26
+chr22	28725242	C	T	CHEK2	0.0	1	0.0	25	0.94	-3	1.0	1	1.0		live	NM_007194.4	c.444+1G>A	Intron 3/14

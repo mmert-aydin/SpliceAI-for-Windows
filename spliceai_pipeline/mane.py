@@ -24,6 +24,7 @@ import csv
 import gzip
 import os
 import re
+import sys
 
 from . import net
 from .app_paths import app_root_dir
@@ -33,6 +34,10 @@ MANE_CURRENT_DIR_URL = "https://ftp.ncbi.nlm.nih.gov/refseq/MANE/MANE_human/curr
 # Default download location: a "mane" folder next to the app (see
 # app_paths.app_root_dir()), which is where the pipeline reads it from.
 DEFAULT_MANE_DIR = os.path.join(app_root_dir(), "mane")
+# From source, fetch-thirdparty.ps1's copy if there is no such folder (as snpeff.py does).
+_FROM_SOURCE = os.path.join(app_root_dir(), "installer", "thirdparty", "mane")
+if not getattr(sys, "frozen", False) and not os.path.isdir(DEFAULT_MANE_DIR) and os.path.isdir(_FROM_SOURCE):
+    DEFAULT_MANE_DIR = _FROM_SOURCE
 
 _SUMMARY_FILENAME_RE = re.compile(r"MANE\.GRCh38\.v[\d.]+\.summary\.txt\.gz")
 

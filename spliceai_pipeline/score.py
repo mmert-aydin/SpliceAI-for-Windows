@@ -47,15 +47,18 @@ def _import_spliceai_utils_safely():
     return su
 
 
+def one_hot_encode(seq):
+    """SpliceAI's own encoding, NumPy-2-safe. Also used by predict.py, so every
+    path encodes a sequence identically -- including SpliceAI's `% 5` quirk for
+    IUPAC codes (M, R, W read as C; Y as T; S as G; K as N)."""
+    base_map = np.asarray([[0, 0, 0, 0], [1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
+    seq = seq.upper().replace("A", "\x01").replace("C", "\x02")
+    seq = seq.replace("G", "\x03").replace("T", "\x04").replace("N", "\x00")
+    return base_map[np.frombuffer(seq.encode("latin-1"), np.int8) % 5]
+
+
 def _patch_one_hot_encode():
     su = _import_spliceai_utils_safely()
-
-    def one_hot_encode(seq):
-        base_map = np.asarray([[0, 0, 0, 0], [1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
-        seq = seq.upper().replace("A", "\x01").replace("C", "\x02")
-        seq = seq.replace("G", "\x03").replace("T", "\x04").replace("N", "\x00")
-        return base_map[np.frombuffer(seq.encode("latin-1"), np.int8) % 5]
-
     su.one_hot_encode = one_hot_encode
 
 

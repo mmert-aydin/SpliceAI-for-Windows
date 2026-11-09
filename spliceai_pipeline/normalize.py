@@ -30,6 +30,7 @@ class Variant:
     orig_alt: str
     allele_fraction: float = None
     skip_reason: str = None
+    zygosity: str = None        # "het" / "hom" / "hemi" (vcfio.zygosities)
 
 
 def fasta_uses_chr_prefix(fasta):
@@ -110,7 +111,7 @@ def normalize_variant(fetch_bases, chrom, pos, ref, alt):
     return pos, ref, alt
 
 
-def normalize_record(fasta, chrom, pos, ref, alts, allele_fractions=None, contigs=None):
+def normalize_record(fasta, chrom, pos, ref, alts, allele_fractions=None, contigs=None, zygosities=None):
     """Normalize one VCF data line, splitting multi-allelic ALTs into one Variant per allele.
 
     allele_fractions, if given, must be aligned 1:1 with alts (see
@@ -128,6 +129,8 @@ def normalize_record(fasta, chrom, pos, ref, alts, allele_fractions=None, contig
         contigs = set(fasta.keys())
     if allele_fractions is None:
         allele_fractions = [None] * len(alts)
+    if zygosities is None:
+        zygosities = [None] * len(alts)
 
     fetch_bases = make_base_fetcher(fasta)
     fasta_chrom = resolve_contig(chrom, contigs)
@@ -139,20 +142,20 @@ def normalize_record(fasta, chrom, pos, ref, alts, allele_fractions=None, contig
         skip_reason = None
 
     variants = []
-    for alt, allele_fraction in zip(alts, allele_fractions):
+    for alt, allele_fraction, zygosity in zip(alts, allele_fractions, zygosities):
         if alt in (".", "*") or alt.startswith("<"):
             continue
         if skip_reason:
             variants.append(Variant(
                 chrom=fasta_chrom or chrom, pos=pos, ref=ref, alt=alt,
                 orig_chrom=chrom, orig_pos=pos, orig_ref=ref, orig_alt=alt,
-                allele_fraction=allele_fraction, skip_reason=skip_reason,
+                allele_fraction=allele_fraction, skip_reason=skip_reason, zygosity=zygosity,
             ))
             continue
         npos, nref, nalt = normalize_variant(fetch_bases, fasta_chrom, pos, ref, alt)
         variants.append(Variant(
             chrom=fasta_chrom, pos=npos, ref=nref, alt=nalt,
             orig_chrom=chrom, orig_pos=pos, orig_ref=ref, orig_alt=alt,
-            allele_fraction=allele_fraction,
+            allele_fraction=allele_fraction, zygosity=zygosity,
         ))
     return variants

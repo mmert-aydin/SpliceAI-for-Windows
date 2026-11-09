@@ -12,8 +12,9 @@ from PySide6.QtWidgets import (
 
 from . import config
 from .reference_download import REFERENCE_URLS, DownloadCancelled, fetch_reference
+from .i18n import N_, t
 
-PHASE_LABELS = {"download": "Downloading", "decompress": "Decompressing", "index": "Building index"}
+PHASE_LABELS = {"download": N_("Downloading"), "decompress": N_("Decompressing"), "index": N_("Building index")}
 
 
 class ReferenceDownloadWorker(QThread):
@@ -50,7 +51,7 @@ class ReferenceDownloadWorker(QThread):
 class ReferenceDownloadDialog(QDialog):
     def __init__(self, parent=None, default_build="hg19"):
         super().__init__(parent)
-        self.setWindowTitle("Download reference FASTA")
+        self.setWindowTitle(t("Download reference FASTA"))
         self.resize(560, 220)
         self._worker = None
         self._result_path = None
@@ -58,7 +59,7 @@ class ReferenceDownloadDialog(QDialog):
         layout = QVBoxLayout(self)
 
         build_row = QHBoxLayout()
-        build_row.addWidget(QLabel("Build:"))
+        build_row.addWidget(QLabel(t("Build:")))
         self.build_combo = QComboBox()
         self.build_combo.addItems(list(REFERENCE_URLS.keys()))
         if default_build in REFERENCE_URLS:
@@ -68,19 +69,18 @@ class ReferenceDownloadDialog(QDialog):
         layout.addLayout(build_row)
 
         dir_row = QHBoxLayout()
-        dir_row.addWidget(QLabel("Save to folder:"))
+        dir_row.addWidget(QLabel(t("Save to folder:")))
         self.dir_edit = QLineEdit()
         self.dir_edit.setText(self._default_dest_dir())
         dir_row.addWidget(self.dir_edit, stretch=1)
-        self.browse_button = QPushButton("Browse...")
+        self.browse_button = QPushButton(t("Browse..."))
         self.browse_button.clicked.connect(self._on_browse)
         dir_row.addWidget(self.browse_button)
         layout.addLayout(dir_row)
 
         note = QLabel(
-            "Downloads ~1 GB (compressed) from UCSC's goldenPath, decompresses to ~3 GB, "
-            "then builds the .fai index. This can take a while depending on your "
-            "connection -- the progress bar below will track it."
+            t("Downloads about 1 GB (compressed) from UCSC's goldenPath, decompresses it to about 3 GB and builds the .fai "
+              "index. Depending on the connection, this may take some time; the progress bar below shows the progress.")
         )
         note.setWordWrap(True)
         layout.addWidget(note)
@@ -93,10 +93,10 @@ class ReferenceDownloadDialog(QDialog):
 
         button_row = QHBoxLayout()
         button_row.addStretch(1)
-        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button = QPushButton(t("Cancel"))
         self.cancel_button.clicked.connect(self._on_cancel_clicked)
         button_row.addWidget(self.cancel_button)
-        self.download_button = QPushButton("Download")
+        self.download_button = QPushButton(t("Download"))
         self.download_button.clicked.connect(self._on_download_clicked)
         button_row.addWidget(self.download_button)
         layout.addLayout(button_row)
@@ -108,7 +108,7 @@ class ReferenceDownloadDialog(QDialog):
         return os.path.join(os.path.expanduser("~"), "SpliceAI_reference_data")
 
     def _on_browse(self):
-        path = QFileDialog.getExistingDirectory(self, "Select destination folder", self.dir_edit.text())
+        path = QFileDialog.getExistingDirectory(self, t("Select destination folder"), self.dir_edit.text())
         if path:
             self.dir_edit.setText(path)
 
@@ -121,7 +121,7 @@ class ReferenceDownloadDialog(QDialog):
     def _on_download_clicked(self):
         dest_dir = self.dir_edit.text().strip()
         if not dest_dir:
-            QMessageBox.warning(self, "No folder selected", "Choose a destination folder first.")
+            QMessageBox.warning(self, t("No folder selected"), t("Choose a destination folder first."))
             return
 
         settings = config.load()
@@ -129,7 +129,7 @@ class ReferenceDownloadDialog(QDialog):
         config.save(settings)
 
         self._set_inputs_enabled(False)
-        self.status_label.setText("Starting...")
+        self.status_label.setText(t("Starting..."))
         self.progress_bar.setRange(0, 0)
 
         build = self.build_combo.currentText()
@@ -143,7 +143,7 @@ class ReferenceDownloadDialog(QDialog):
     def _on_cancel_clicked(self):
         if self._worker is not None:
             self._worker.cancel()
-            self.status_label.setText("Cancelling...")
+            self.status_label.setText(t("Cancelling..."))
             self.cancel_button.setEnabled(False)
         else:
             self.reject()
@@ -154,17 +154,17 @@ class ReferenceDownloadDialog(QDialog):
             self.progress_bar.setRange(0, total)
             self.progress_bar.setValue(done or 0)
             pct = (done or 0) / total * 100
-            self.status_label.setText(f"{label}... {pct:.0f}% ({(done or 0) / 1e6:.0f} MB / {total / 1e6:.0f} MB)")
+            self.status_label.setText(t(label) + f"... {pct:.0f}% ({(done or 0) / 1e6:.0f} MB / {total / 1e6:.0f} MB)")
         else:
             self.progress_bar.setRange(0, 0)
-            self.status_label.setText(f"{label}...")
+            self.status_label.setText(t(label) + "...")
 
     def _on_finished(self, fasta_path):
         self._result_path = fasta_path
         self._worker = None
         self.progress_bar.setRange(0, 1)
         self.progress_bar.setValue(1)
-        self.status_label.setText(f"Done: {fasta_path}")
+        self.status_label.setText(t("Done: {path}", path=fasta_path))
         self.accept()
 
     def _on_failed(self, message):
@@ -173,8 +173,8 @@ class ReferenceDownloadDialog(QDialog):
         self.cancel_button.setEnabled(True)
         self.progress_bar.setRange(0, 1)
         self.progress_bar.setValue(0)
-        self.status_label.setText("Failed.")
-        QMessageBox.critical(self, "Download failed", message)
+        self.status_label.setText(t("Failed."))
+        QMessageBox.critical(self, t("Download failed"), message)
 
     def _on_cancelled(self):
         self._worker = None
@@ -182,7 +182,7 @@ class ReferenceDownloadDialog(QDialog):
         self.cancel_button.setEnabled(True)
         self.progress_bar.setRange(0, 1)
         self.progress_bar.setValue(0)
-        self.status_label.setText("Cancelled.")
+        self.status_label.setText(t("Cancelled."))
 
     def result_path(self):
         return self._result_path

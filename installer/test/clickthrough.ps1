@@ -235,6 +235,9 @@ if ($box) {
 Log "  VCF pasted by $how"
 $auto = Wait-For { Find-In $main 'from the VCF \(reference=hg19\)' } 15
 Shot "app-vcf-pasted"; Check "app.build_selected_from_vcf (hg19)" $auto
+# Run waits for a Genes-to-score choice: All genes.
+$how = Act (Find-In $main 'All genes$' "Button") "SpliceAI Variant Scoring" $null { (Find-In $main '^Run$' "Button").Current.IsEnabled } 15
+Log "  All genes chosen by $how"
 $how = Act (Find-In $main '^Run$' "Button") "SpliceAI Variant Scoring" $null { Find-In $main 'Loading reference|Reading and normalizing|live-scored|^Done -- |^Failed' } 30
 Log "  Run pressed by $how"
 $result = Wait-For { Find-In $main '^Done -- ' } 300

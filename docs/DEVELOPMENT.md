@@ -50,15 +50,19 @@ requirements.txt / requirements-build.txt
 ```
 py -3.13 -m venv .venv
 .venv\Scripts\python -m pip install -r requirements.txt
-.venv\Scripts\python -m pip install --no-deps spliceai==1.3.1
 .venv\Scripts\python -m spliceai_gui
 ```
 
 **SpliceAI is installed separately on purpose.** Its license forbids
-redistributing it, so the app never bundles it. The app checks for it at
-startup and offers to install it.
+redistributing it, so the app never bundles it. From source the app finds it as
+the installed program does, in `%USERPROFILE%\.spliceai_gui\python-packages`, and
+if it's missing shows the same setup dialog at startup.
 
-- `--no-deps` skips pysam, which has no Windows build and isn't needed.
+- Never pip-install SpliceAI into `.venv`: `installer\build.ps1` refuses to build
+  with it there.
+- A command-line module started on its own (`-m spliceai_pipeline.cli`,
+  `refdb_build`) has to be told where it is:
+  `$env:PYTHONPATH = "$env:USERPROFILE\.spliceai_gui\python-packages"`.
 - The copy of the app that was tested on this PC never showed the
   "SpliceAI missing" screen. That's because spliceai had already been
   installed into its `_internal` folder.
@@ -369,6 +373,39 @@ docstrings inside the compiled program, so Setup.exe was rebuilt to leave the
 old names out of it too. Built on a second PC with Python 3.13.2 (1.1.0 used
 3.13.1); every other pinned version and bundled file is the same, see
 `installer/BUNDLED-VERSIONS.md`.
+
+**The command line reads a gzipped VCF whatever its name (2026-10-26).** The
+CLI decided by the file name: a bgzipped VCF saved as `.vcf` (real exports
+do this) stopped the run with `ValueError: invalid literal for int()`, and a
+plain one named `.vcf.gz` failed too. `spliceai_pipeline/vcfio.py` now checks
+the first two bytes, as the window already did (`main_window._is_gzip`).
+Check in `tests/test_pipeline.py`.
+
+**1.2.0 (2026-11).** See the README for what each part does.
+
+- **Sequence to cDNA tab** (new): a sample's sequence of one gene, or events
+  given as coordinates, aligned to the reference; SpliceAI's prediction on the
+  sample's sequence; the predicted transcripts, cDNA and protein ranked, with
+  WT concordance, a sequence-specificity control and the viewer.
+  `align.py`, `haplotype.py`, `coord_events.py`, `splice_paths.py`, `cdna.py`,
+  `cdna_analysis.py`, `wt_concordance.py`, `specificity.py`, `view_data.py`,
+  `bundle.py`, `bedgraph.py`; in the window `cdna_tab.py`, `cdna_worker.py`,
+  `cdna_help.py`, `viewer_window.py`, `stacked_view.py`, `exon_view.py`,
+  `sequence_view.py`.
+- **Reference score database** (new): built on this PC or imported from a
+  folder, checked against the WT validation sets before use; without it the
+  tab computes live. `predict.py` (the one prediction path, equal to
+  `get_delta_scores`' reference prediction), `transcripts.py`, `refdb.py`,
+  `refdb_build.py`, `refdb_validate.py`; in the window `refdb_wizard.py`.
+- **From the VCF tab to the Sequence to cDNA tab:** *Analyse transcript
+  effect...* (`vcf_bridge.py`, `transcript_effect_dialog.py`).
+- **VCF tab:** score only chosen genes (`--genes` on the command line), a
+  zygosity column.
+- **English or Turkish** (`i18n.py`, `tr.py`; the pipeline's own texts are
+  made with `texts.tx` and stay English in files). Setup asks too
+  (`installer/messages-tr.isl`, `terms-tr.txt`).
+- [hg19-canonical-vs-vcf-tab.tsv](hg19-canonical-vs-vcf-tab.tsv): the hg19
+  genes whose canonical transcript differs from the VCF tab's choice.
 
 ## Still open
 

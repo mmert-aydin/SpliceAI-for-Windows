@@ -47,6 +47,26 @@ WARN_SOFT = "#fbeada"
 CRIT = "#a3181f"
 CRIT_SOFT = "#fadfe0"
 
+# SpliceAI's two site types, in the Sequence-to-cDNA tab and its viewer: two
+# Okabe-Ito hues that stay apart for every common form of colour blindness.
+ACCEPTOR = "#0072B2"
+DONOR = "#E69F00"
+
+# The "Open viewer" button's own accent (spec 15 item 7): Okabe-Ito vermillion,
+# darkened so white text on it has a 5.2:1 contrast; orange against the teal
+# accent stays apart for every common colour blindness, and as a filled button
+# with white text it reads the same on a light or a dark surround.
+VIEWER = "#B25000"
+VIEWER_DARK = "#8F4000"
+# The Sequence-to-cDNA tab's introduction "?".
+YELLOW = "#fde68a"
+YELLOW_LINE = "#f2c94c"
+# Genes to score: All genes in the deeper orange, a gene list in the lighter one.
+ORANGE = "#efc3a0"
+ORANGE_DARK = "#e6ad82"
+ORANGE_SOFT = "#fae6d6"
+ORANGE_LINE = "#efcdb2"
+
 # Consolas and Cascadia Mono ship with Windows; Courier New is the last resort.
 MONO_FAMILIES = ("Consolas", "Cascadia Mono", "Courier New")
 
@@ -149,6 +169,25 @@ QPushButton#runButton {{
 }}
 QPushButton#runButton:hover {{ background: {TEAL_DARK}; border-color: {TEAL_DARK}; }}
 QPushButton#runButton:disabled {{
+    background: {SURFACE_2}; border-color: {LINE}; color: {INK_3};
+}}
+
+/* Genes to score: the choice Run waits for; the chosen one gets a dark frame. */
+QPushButton#allGenesButton {{ background: {ORANGE}; border-color: {ORANGE_DARK}; color: {INK}; font-weight: 600; }}
+QPushButton#allGenesButton:hover {{ background: {ORANGE_DARK}; border-color: {ORANGE_DARK}; }}
+QPushButton#geneListButton {{ background: {ORANGE_SOFT}; border-color: {ORANGE_LINE}; color: {INK}; font-weight: 600; }}
+QPushButton#geneListButton:hover {{ background: {ORANGE_LINE}; }}
+QPushButton#allGenesButton:checked, QPushButton#geneListButton:checked {{ border: 2px solid {INK_2}; }}
+
+/* Open viewer: the way into the results, in its own colour. */
+QPushButton#viewerButton {{
+    background: {VIEWER};
+    border-color: {VIEWER};
+    color: #ffffff;
+    font-weight: 600;
+}}
+QPushButton#viewerButton:hover {{ background: {VIEWER_DARK}; border-color: {VIEWER_DARK}; }}
+QPushButton#viewerButton:disabled {{
     background: {SURFACE_2}; border-color: {LINE}; color: {INK_3};
 }}
 

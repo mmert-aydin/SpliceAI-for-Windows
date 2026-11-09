@@ -1,5 +1,6 @@
 """Writing the merged score table to CSV/TSV."""
 import csv
+import dataclasses
 
 from .merge import ScoreRow
 
@@ -7,13 +8,13 @@ FIELDNAMES = [
     "chrom", "pos", "ref", "alt", "gene",
     "DS_AG", "DP_AG", "DS_AL", "DP_AL", "DS_DG", "DP_DG", "DS_DL", "DP_DL",
     "max_score", "allele_fraction", "source", "snpeff_transcript", "snpeff_hgvs_c",
-    "snpeff_region",
+    "snpeff_region", "zygosity",
 ]
 
 
 
-# Columns read_rows() requires in a results file; the SnpEff and
-# allele-fraction columns are optional there.
+# Columns read_rows() requires in a results file; the SnpEff, allele-fraction
+# and zygosity columns are optional there.
 REQUIRED_LOAD_COLUMNS = [
     "chrom", "pos", "ref", "alt", "gene",
     "DS_AG", "DP_AG", "DS_AL", "DP_AL", "DS_DG", "DP_DG", "DS_DL", "DP_DL",
@@ -63,7 +64,7 @@ def write_rows(rows, out_path, delimiter="\t"):
                 _fmt(row.DS_DG), _fmt(row.DP_DG), _fmt(row.DS_DL), _fmt(row.DP_DL),
                 _fmt(row.max_score), _fmt(row.allele_fraction), row.source,
                 _fmt(row.snpeff_transcript), _fmt(row.snpeff_hgvs_c),
-                _fmt(row.snpeff_region),
+                _fmt(row.snpeff_region), _fmt(row.zygosity),
             ])
 
 
@@ -71,7 +72,7 @@ def delimiter_for_path(path):
     return "," if path.lower().endswith(".csv") else "\t"
 
 
-def write_rows_ordered(rows, out_path, column_specs, delimiter="\t"):
+def write_rows_ordered(rows, out_path, column_specs, delimiter="\t", note=None):
     """Like write_rows, but with an arbitrary caller-supplied column set/order instead
     of the fixed FIELDNAMES schema -- used by the GUI's CSV export so the file matches
     whatever column arrangement the user currently has in the results table (including
@@ -79,21 +80,28 @@ def write_rows_ordered(rows, out_path, column_specs, delimiter="\t"):
     CLI's own fixed schema and is left untouched).
 
     column_specs: list of (header_label, ScoreRow attribute name) pairs, in write order.
+    note: a line (or a list of lines) written above the header (after Excel's sep= hint), e.g. a
+    research-use note.
     """
-    with open(out_path, "w", newline="") as fh:
+    with open(out_path, "w", newline="", encoding="utf-8") as fh:
         _write_excel_sep_hint(fh, delimiter)
         writer = csv.writer(fh, delimiter=delimiter)
+        for line in [note] if isinstance(note, str) else note or []:
+            writer.writerow([line])
         writer.writerow([label for label, _ in column_specs])
         for row in rows:
             writer.writerow([_fmt(getattr(row, attr)) for _, attr in column_specs])
 
 
-def _parse_cell(raw, name):
-    if name in _INT_COLUMNS:
-        return None if raw == "" else int(raw)
-    if name in _FLOAT_COLUMNS:
-        return None if raw == "" else float(raw)
-    return raw
+def _int_or_none(raw):
+    return None if raw == "" else int(raw)
+
+
+def _float_or_none(raw):
+    return None if raw == "" else float(raw)
+
+
+_SCOREROW_FIELDS = [f.name for f in dataclasses.fields(ScoreRow)]
 
 
 def read_rows(path):
@@ -127,31 +135,36 @@ def read_rows(path):
                 f"{', '.join(missing)}."
             )
 
+        # Converters resolved once, in ScoreRow field order, rather than per cell:
+        # a WGS result is millions of rows.
         col_index = {name: header.index(name) for name in header}
+        none_if_blank = lambda v: v or None
+        converters = []
+        for name in _SCOREROW_FIELDS:
+            if name == "pos":
+                conv = int
+            elif name in _INT_COLUMNS:
+                conv = _int_or_none
+            elif name in _FLOAT_COLUMNS:
+                conv = _float_or_none
+            elif name in REQUIRED_LOAD_COLUMNS:
+                conv = str
+            else:
+                conv = none_if_blank
+            converters.append((col_index.get(name), conv))
+        n_cols = len(header)
         rows = []
+        append = rows.append
         for line_num, fields in enumerate(reader, start=2):
             if not fields or fields == [""]:
                 continue
-            if len(fields) != len(header):
+            if len(fields) != n_cols:
                 raise ResultsFileError(
-                    f"Line {line_num}: expected {len(header)} column(s), found {len(fields)}."
+                    f"Line {line_num}: expected {n_cols} column(s), found {len(fields)}."
                 )
             try:
-                values = {name: _parse_cell(fields[idx], name) for name, idx in col_index.items()}
-                rows.append(ScoreRow(
-                    chrom=values["chrom"], pos=int(values["pos"]), ref=values["ref"], alt=values["alt"],
-                    gene=values["gene"],
-                    DS_AG=values["DS_AG"], DP_AG=values["DP_AG"],
-                    DS_AL=values["DS_AL"], DP_AL=values["DP_AL"],
-                    DS_DG=values["DS_DG"], DP_DG=values["DP_DG"],
-                    DS_DL=values["DS_DL"], DP_DL=values["DP_DL"],
-                    max_score=values["max_score"], source=values["source"],
-                    snpeff_transcript=values.get("snpeff_transcript") or None,
-                    snpeff_hgvs_c=values.get("snpeff_hgvs_c") or None,
-                    snpeff_region=values.get("snpeff_region") or None,
-                    allele_fraction=values.get("allele_fraction"),
-                ))
-            except (ValueError, KeyError) as exc:
+                append(ScoreRow(*[None if idx is None else conv(fields[idx]) for idx, conv in converters]))
+            except ValueError as exc:
                 raise ResultsFileError(f"Line {line_num}: could not parse row ({exc}).") from exc
 
         if not rows:

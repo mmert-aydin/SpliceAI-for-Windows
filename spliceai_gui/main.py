@@ -3,13 +3,10 @@ import sys
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QDialog
 
-from . import theme
+from . import i18n, theme
 from .assets_paths import LOGO_PNG
 from .first_launch_dialog import FirstLaunchDialog
-from .main_window import MainWindow
-from .reference_note import show_reference_note_if_needed
 from .spliceai_setup import activate_packages_dir, is_spliceai_installed
-from .spliceai_setup_dialog import SpliceAISetupDialog
 
 
 def configure_app_icon(app):
@@ -59,6 +56,8 @@ def show_spliceai_setup_notice_if_needed(app):
     """
     if is_spliceai_installed():
         return
+    from .spliceai_setup_dialog import SpliceAISetupDialog    # after the notice: in the language chosen there
+
     previous = app.quitOnLastWindowClosed()
     app.setQuitOnLastWindowClosed(False)
     try:
@@ -68,6 +67,10 @@ def show_spliceai_setup_notice_if_needed(app):
 
 
 def build_and_show_main_window():
+    # Imported only now, after the first-launch notice: its texts are built at import, in the language the
+    # notice may just have switched to (i18n.py).
+    from .main_window import MainWindow
+
     window = MainWindow()
     window.show()
     return window
@@ -80,6 +83,7 @@ def main():
     activate_packages_dir()
     app = QApplication(sys.argv)
     theme.apply_theme(app)
+    i18n.install_qt_translation(app)
     configure_app_icon(app)
     accepted = show_first_launch_notice(app)
     if not accepted:
@@ -88,6 +92,8 @@ def main():
     window = build_and_show_main_window()
     # Non-blocking: points a fresh install at the reference data it still
     # needs. Skipped when the window found the files by itself.
+    from .reference_note import show_reference_note_if_needed
+
     show_reference_note_if_needed(window, window.reference_paths())
     return app.exec()
 

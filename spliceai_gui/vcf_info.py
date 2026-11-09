@@ -14,6 +14,7 @@ import re
 from dataclasses import dataclass, field
 
 from .vcf_check import data_lines
+from .i18n import N_
 
 # Maps a free-form "##reference=" value to one of the Build dropdown's
 # builds; the first pattern that matches wins.
@@ -59,7 +60,7 @@ def detect_vcf_build(text):
             if fields.get("ID") in ("1", "chr1"):
                 build = _CHR1_LENGTH_TO_BUILD.get(fields.get("length", ""))
                 if build:
-                    return build, "chr1 length in its ##contig lines"
+                    return build, N_("chr1 length in its ##contig lines")
     return None, None
 
 

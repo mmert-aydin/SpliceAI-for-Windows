@@ -4,7 +4,8 @@ __pycache__/
 build/
 dist/
 
-# Downloaded at runtime next to the app, not project code
+# Downloaded at runtime next to the app, not project code. (refseq/ is
+# tracked: UCSC's curated RefSeq tables, public and small, spec 14 D.)
 snpeff/
 mane/
 java/
@@ -30,3 +31,14 @@ tests/.cache/
 *.xlsx
 !examples/*.vcf
 !installer/test/data/*.vcf
+# The patient regression cases (genes, variants, expected scores): local only.
+docs/local_regression.md
+
+# The public demo VCF's frozen output (tests/test_pipeline.py), and a table
+# made from public annotation only.
+!tests/data/clinvar-splice-demo-hg38.*.tsv
+!docs/hg19-canonical-vs-vcf-tab.tsv
+
+# Kept on this PC only: the development phase reports and research experiments.
+docs/phase_reports/
+experiments/

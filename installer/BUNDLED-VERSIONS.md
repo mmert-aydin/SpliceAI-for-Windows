@@ -78,6 +78,19 @@ wrapt==2.4.1
 
 To rebuild with exactly these: `.venv\Scripts\python -m pip install -r <this list saved as a file>`.
 
+Added since Setup 1.1.1 (2026-10-27, for the Sequence-to-cDNA work), in the
+next build: `parasail==1.3.4` (sequence alignment, BSD license; needs only
+numpy). `build.ps1` installs its wheel before the rest, checked by SHA-256:
+
+| | |
+|---|---|
+| File | `parasail-1.3.4-py2.py3-none-win_amd64.whl` (2,628,558 bytes) |
+| URL | https://files.pythonhosted.org/packages/7d/3d/3fb505271ca157798326c3f4c357ccde2c1c6f05f05400aa19e3e55bbd01/parasail-1.3.4-py2.py3-none-win_amd64.whl |
+| SHA-256 | `25b8260b922933c8e7e8ce008ddcbbff4ef998b7d077169ed441d70ab7a78b5a` (as PyPI publishes it) |
+
+Its `parasail.dll` is loaded with ctypes, so `SpliceAI-VariantScoring.spec`
+collects it explicitly.
+
 ## SpliceAI — downloaded on the user's PC, never bundled
 
 The single source of truth is `spliceai_gui/spliceai_setup.py`; `build.ps1`
@@ -101,6 +114,11 @@ passes these values into the installer.
 | Java | Eclipse Temurin JRE 21.0.12.1+1 (x64, 2026-08-18) | release `jdk-21.0.12.1+1`, checksum from Adoptium API |
 | MANE | `MANE.GRCh38.v1.5.summary.txt.gz` (NCBI release_1.5) | `D10ACE2720681A3B2E0EEFD9DA4F551274A6B4141AC9BFD6A2565DFB6E9AD55C` |
 | VC++ runtime | 14.44.35208.0 x64 (from the build PC's VC++ 2015-2022 redistributable) | see below |
+| UCSC curated RefSeq, hg19 | `hg19.ncbiRefSeqCurated.txt.gz` (UCSC, Last-Modified 2024-09-18) | `DAF41B6C1A7465F71E0DE1E680B973249B9345BAB6ADAD15B48ACD620EA30062` |
+| UCSC curated RefSeq, hg38 | `hg38.ncbiRefSeqCurated.txt.gz` (UCSC, Last-Modified 2025-08-13) | `67090326B606658BDABDFE5F8DCB97B7943AC802C7945399522BE7174EC021CA` |
+
+The two UCSC tables are fetched (into `thirdparty\refseq`) for the reference
+score database since 2026-10-26; Setup 1.1.1 doesn't ship them yet.
 
 SnpEff's `examples/`, `galaxy/` and `.claude/` folders are left out of Setup (not used).
 

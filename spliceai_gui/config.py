@@ -33,16 +33,41 @@ DEFAULTS = {
     "column_order_v2_applied": False,
     # Heights of the three draggable panes, as the user last left them.
     "pane_sizes": [],
+    # Genes a VCF run is limited to (Settings > "Genes to score"); empty: all.
+    "score_genes": [],
     "snpeff_dir": "",
     "mane_dir": "",
     # SnpEff comes with Setup, so annotating is the normal case rather than
     # something to opt into. The window turns it off again if SnpEff can't be
     # found, so this default can never block a run.
     "use_snpeff": True,
+    # Prefer the MANE Select transcript among SnpEff's (spec 17 item 2).
+    "use_mane": True,
     # Set once _migrate has turned the above on for a settings file written
     # before SnpEff shipped with the program; see _migrate.
     "snpeff_default_applied": False,
     "hide_reference_note": False,
+    # Reference score database builds still to do, the running one first
+    # (refdb_wizard.RefdbManager), and validation set files chosen per build.
+    "refdb_jobs": [],
+    "refdb_validation_sets": {},
+    # Sequence-to-cDNA tab parameters (spec 7.3, 6.2); the genome build there
+    # is chosen anew every time, on purpose (spec 6.1).
+    "cdna_threshold": 0.05,
+    "cdna_min_exon": 3,
+    "cdna_min_intron": 60,
+    "cdna_apply_min_size": 10,
+    "cdna_top": 5,
+    "cdna_low_concordance": 0.9,
+    # A sample candidate whose differing sites all changed less than this is "weak evidence" (decided after Phase 8).
+    "cdna_weak_delta": 0.5,
+    # Random stand-ins per event in the optional sequence-specificity control (spec 14 C3).
+    "cdna_specificity_n": 20,
+    # The tab's introduction, shown the first time it is opened until "Don't show again" (spec 15 item 6).
+    "cdna_show_intro": True,
+    "language": "en",            # "en" or "tr"; the window's texts only, never written results (i18n.py)
+    # The viewer's side panel, px (spec 16 item 3); kept as it was last left.
+    "viewer_details_width": 320,
 }
 
 

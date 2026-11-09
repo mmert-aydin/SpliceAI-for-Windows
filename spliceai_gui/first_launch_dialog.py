@@ -19,46 +19,47 @@ Decline above in any way; see license_dialog.py.
 """
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QFontDatabase
-from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QApplication, QComboBox, QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
+from . import config, i18n
+from .i18n import N_, t
 from .license_dialog import LicenseDialog
 
-FIRST_LAUNCH_TITLE = "Welcome to SpliceAI Variant Scoring."
+FIRST_LAUNCH_TITLE = N_("Welcome to SpliceAI Variant Scoring.")
 
 FIRST_LAUNCH_SECTIONS = [
     (
-        "Purpose of Development",
-        "This tool was built to make SpliceAI usable as a standard local Windows application, without requiring "
-        "Linux, WSL, or manual command-line operation. It grew out of practical need during variant analysis work, "
-        "where the setup overhead between a VCF file and a scored result was the actual bottleneck, not the science "
-        "itself.",
+        None,   # the purpose, right under the welcome line, needs no heading
+        N_("This program was developed so that users who wish to work with SpliceAI can examine their variants without "
+           "Linux, WSL or the command line, and so that SpliceAI's raw output can be brought into a form suitable for "
+           "analysis."),
     ),
     (
-        "About SpliceAI",
-        "SpliceAI is a neural network model, developed by Illumina, that predicts the likelihood a genetic variant "
-        "disrupts normal RNA splicing. This program is an interface to that model; it does not alter or replace it.",
+        N_("About SpliceAI"),
+        N_("SpliceAI is a deep-learning model developed by Illumina that predicts whether a genetic variant alters "
+           "normal RNA splicing. This program provides an interface to the model; it does not modify or replace it."),
     ),
     (
-        "About SnpEff",
-        "This tool also uses SnpEff (open source, MIT license) to annotate each variant with its affected transcript "
-        "and coding-sequence position. Credit to its original author, Pablo Cingolani.",
+        N_("About Sequence to cDNA"),
+        N_("The Sequence to cDNA tab takes a sample sequence of one gene, or variants entered as coordinates, and "
+           "uses SpliceAI to predict how it will be spliced. This makes it possible to compare the reference exons, "
+           "the normal splicing predicted for the reference sequence, and the predicted effect of the variant."),
     ),
     (
-        "Terms of Use",
-        "This software is provided for academic and research use only, without warranty of any kind, express or "
+        N_("Terms of Use"),
+        N_("This software is provided for academic and research use only, without warranty of any kind, express or "
         "implied. It is not a diagnostic tool, and its output must not be used for clinical decision-making without "
         "independent verification by qualified personnel. SpliceAI itself is licensed separately by Illumina, Inc.; "
         "use of this program does not grant any rights under that license, and the user is solely responsible for "
         "compliance with it. The developer assumes no liability for any use of this software or reliance on its "
-        "output. By using this program, the user accepts all associated risk.",
+        "output. By using this program, the user accepts all associated risk."),
     ),
 ]
 
 
 # Where to send bugs and suggestions -- shown just above the signature.
 CONTACT_EMAIL = "aydinn.mmert@gmail.com"
-CONTACT_LEAD = "Bugs, fixes and suggestions"
-CONTACT_TEXT = f"{CONTACT_LEAD}: {CONTACT_EMAIL}"
+CONTACT_LEAD = N_("Bug reports and suggestions")
 
 # Shown right-aligned under the notice, in a handwriting-style font when one
 # is installed (see FirstLaunchDialog.__init__).
@@ -73,21 +74,12 @@ SIGNATURE_FONT_CANDIDATES = (
 )
 
 
-def _build_first_launch_html():
-    parts = [f"<p><b>{FIRST_LAUNCH_TITLE}</b></p>"]
+def first_launch_html():
+    """The notice in the window's language (i18n.t), built when shown: the language can be changed right here."""
+    parts = [f"<p><b>{t(FIRST_LAUNCH_TITLE)}</b></p>"]
     for header, body in FIRST_LAUNCH_SECTIONS:
-        parts.append(f"<p><b>{header}</b><br>{body}</p>")
+        parts.append(f"<p><b>{t(header)}</b><br>{t(body)}</p>" if header else f"<p>{t(body)}</p>")
     return "".join(parts)
-
-
-FIRST_LAUNCH_HTML = _build_first_launch_html()
-
-# The same notice as plain text (title and sections separated by blank lines).
-
-
-FIRST_LAUNCH_TEXT = FIRST_LAUNCH_TITLE + "\n\n" + "\n\n".join(
-    f"{header}\n{body}" for header, body in FIRST_LAUNCH_SECTIONS
-)
 
 
 def _pick_signature_font_family():
@@ -102,25 +94,34 @@ def _pick_signature_font_family():
 
 
 class FirstLaunchDialog(QDialog):
+    """The notice, with the language choice (English / Türkçe) at its top right: the first thing a new user
+    sees is in a language they read, and the window after it opens in the same language."""
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Welcome to SpliceAI Variant Scoring")
         self.setModal(True)
-        self.resize(560, 460)
+        self.resize(560, 480)
 
         layout = QVBoxLayout(self)
+        top = QHBoxLayout()
+        top.addStretch(1)
+        self.language_combo = QComboBox()
+        for code, name in i18n.LANGUAGES.items():
+            self.language_combo.addItem(name, code)
+        self.language_combo.setCurrentIndex(list(i18n.LANGUAGES).index(i18n.language()))
+        self.language_combo.setToolTip("Language / Dil")
+        self.language_combo.currentIndexChanged.connect(self._on_language_changed)
+        top.addWidget(self.language_combo)
+        layout.addLayout(top)
 
-        body_label = QLabel(FIRST_LAUNCH_HTML)
-        body_label.setTextFormat(Qt.RichText)
-        body_label.setWordWrap(True)
-        layout.addWidget(body_label)
+        self.body_label = QLabel()
+        self.body_label.setTextFormat(Qt.RichText)
+        self.body_label.setWordWrap(True)
+        layout.addWidget(self.body_label)
 
-        self.contact_label = QLabel(
-            f'{CONTACT_LEAD}: <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a>'
-        )
+        self.contact_label = QLabel()
         self.contact_label.setTextFormat(Qt.RichText)
         self.contact_label.setOpenExternalLinks(True)
-        self.contact_label.setToolTip("Opens your e-mail program")
         layout.addWidget(self.contact_label, alignment=Qt.AlignRight)
 
         self.signature_label = QLabel(SIGNATURE_TEXT)
@@ -132,7 +133,7 @@ class FirstLaunchDialog(QDialog):
         layout.addWidget(self.signature_label, alignment=Qt.AlignRight)
 
         full_license_row = QHBoxLayout()
-        self.full_license_button = QPushButton("Read the full license...")
+        self.full_license_button = QPushButton()
         self.full_license_button.setFlat(True)
         self.full_license_button.setCursor(Qt.PointingHandCursor)
         self.full_license_button.setStyleSheet("QPushButton { color: palette(link); text-align: left; }")
@@ -142,18 +143,40 @@ class FirstLaunchDialog(QDialog):
         layout.addLayout(full_license_row)
 
         button_row = QHBoxLayout()
-        self.decline_button = QPushButton("Decline")
+        self.decline_button = QPushButton()
         self.decline_button.clicked.connect(self.reject)
         button_row.addWidget(self.decline_button)
-
         button_row.addStretch(1)
-
-        self.accept_button = QPushButton("I have read and accept the terms")
+        self.accept_button = QPushButton()
         self.accept_button.setDefault(True)
         self.accept_button.clicked.connect(self.accept)
         button_row.addWidget(self.accept_button)
-
         layout.addLayout(button_row)
+        self._show_texts()
+
+    def _show_texts(self):
+        self.setWindowTitle(t("Welcome to SpliceAI Variant Scoring"))
+        self.body_label.setText(first_launch_html())
+        self.contact_label.setText(f'{t(CONTACT_LEAD)}: <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a>')
+        self.contact_label.setToolTip(t("Opens your e-mail program"))
+        self.full_license_button.setText(t("Read the full license..."))
+        self.decline_button.setText(t("Decline"))
+        self.accept_button.setText(t("I have read and accept the terms"))
+        # Wrapped text doesn't make the window taller by itself (the Turkish one is longer, and the language can
+        # change while it is open): never shorter than the text needs at this width.
+        self.layout().activate()
+        need = self.layout().totalHeightForWidth(self.width())
+        self.setMinimumHeight(need)
+        if self.height() < need:
+            self.resize(self.width(), need)
+
+    def _on_language_changed(self):
+        """Takes effect at once: nothing else of the program is built yet (main.py imports it after this)."""
+        settings = config.load()
+        settings["language"] = i18n._language = self.language_combo.currentData()
+        config.save(settings)
+        i18n.install_qt_translation(QApplication.instance())
+        self._show_texts()
 
     def _on_read_full_license(self):
         LicenseDialog(self).exec()
