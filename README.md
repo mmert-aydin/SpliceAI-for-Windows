@@ -44,8 +44,12 @@ Python or the command line. Install it, drop in a VCF, press Run.
 
 ## Download and install
 
-1. Download `SpliceAI-VariantScoring-Setup-1.2.0.exe` from the
-   [latest release](https://github.com/mmert-aydin/SpliceAI-for-Windows/releases/latest).
+1. Download the installer, `SpliceAI-VariantScoring-Setup-<version>.exe`, from the
+   [releases page](https://github.com/mmert-aydin/SpliceAI-for-Windows/releases).
+   Version 1.2.0 is a source release: its installer comes with 1.2.1. Until then,
+   Setup 1.1.1 installs the program without the Sequence to cDNA tab, the
+   reference score database and Turkish; to use those now, run 1.2.0 from
+   source (see [Build from source](#build-from-source)).
 2. Run it. The installer isn't digitally signed, so Windows may say
    *"Windows protected your PC"*: click **More info**, then **Run anyway**.
 3. Setup needs an internet connection once, for about a minute, to download
@@ -95,8 +99,9 @@ from the reference) and click **Check compatibility**. It
 aligns the sequence to the reference and lists every difference:
 substitutions, insertions, deletions, duplications, inversions and complex
 changes, left-aligned. Only the ones ticked under *Apply* build the sample's
-sequence: by default those of 10 bp or more, and every inversion and
-duplication. **Run** then predicts the sample's sequence near those changes
+sequence: by default those of 3 bp or more, and every inversion and
+duplication (with none of those, every SNV). Differences left out are named
+in a notice. **Run** then predicts the sample's sequence near those changes
 and builds transcripts from SpliceAI's per-base probabilities.
 
 The **Coordinates** field takes a range (the alignment is limited to it) or a

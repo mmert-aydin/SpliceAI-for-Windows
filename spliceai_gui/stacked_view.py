@@ -45,7 +45,7 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QFontMetrics, QImage, QPainter, QPen
-from PySide6.QtWidgets import QToolTip, QWidget
+from PySide6.QtWidgets import QMenu, QToolTip, QWidget
 
 from spliceai_pipeline import cdna_analysis, haplotype
 
@@ -168,7 +168,7 @@ class TrackPainter:
             elif kind == EVENTS and self.labels:
                 event_labels(p, rect, self.data, self.x_of)
             if self.labels:
-                row_label(p, rect, kind, payload, self.data, self.delta_scale)
+                row_label(p, rect, kind, payload, self.data)
             y += h + ROW_GAP
         if self.labels:
             event_bands(p, self.data, self._rows, self.x_of, width)
@@ -586,22 +586,18 @@ def insertion_gaps(p, data, rows, x_of, width):
         y += h + ROW_GAP
 
 
-def row_label(p, rect, kind, payload, data, delta_scale=None, delta_max=None):
-    """The row's name at its left, on a light backing; the delta row's says what its height stands for."""
+def row_label(p, rect, kind, payload, data, menu=False):
+    """The row's name at its left, on a light backing. menu (on screen, not in an exported image): a sample
+    candidate's name ends in a "▾" when a click on it lists other candidates."""
     if kind in (RULER, LEGEND, EVENTS):
         return
     text = {DNA: "Reference DNA" if payload == "ref" else "Sample sequence",
             SCORES: "Reference scores" if payload == "ref" else "Sample scores",
-            DELTA: "Delta (sample - reference)"}.get(kind)
-    if kind == DELTA and delta_scale is not None:
-        if delta_max is not None and delta_max >= delta_scale:
-            text += f" · max |Δ| in view {delta_max:.3f} = full height"
-        else:
-            text += (f" · max |Δ| in view {delta_max:.3f}" if delta_max is not None else "") + \
-                f" · full height ±{delta_scale:.3f}"
-        text += f" · red ticks: |Δ| ≥ {DELTA_MARK:g}"
+            DELTA: "Delta"}.get(kind)
     if kind == TRANSCRIPT:
         text = payload.name + (f"  relative score {payload.relative:.3f}" if payload.relative is not None else "")
+        if menu and payload.group == "patient" and sum(r.group == "patient" for r in data.rows) > 1:
+            text += "  ▾"       # a click on the name picks another sample candidate
     if not text:
         return
     w = p.fontMetrics().horizontalAdvance(text) + 8
@@ -626,6 +622,7 @@ class StackedView(QWidget):
     hovered = Signal(int)       # the genomic column under the pointer
     moved = Signal()            # a frame was drawn at another place or zoom
     details = Signal(object)    # everything about the base, exon or event clicked (or Shift-hovered): sections
+    sample_changed = Signal(int)    # the sample candidate shown
     _tile_ready = Signal(object, object)
 
     def __init__(self, data, parent=None):
@@ -636,6 +633,8 @@ class StackedView(QWidget):
         self.show_alternatives = False      # curated alternative NM_ (annotation)
         self.show_spliceai_alternatives = False
         self.focus = False                  # spec 16: only the reference, WT predicted 1 and sample 1 rows
+        self.sample_rank = 1                # the sample candidate shown (a click on its name picks another)
+        self._before_whole = None           # (first, cols_per_px) the whole-gene toggle goes back to
         self.show_origin = False            # spec 16 item 2: outline where inserted bases come from
         self.start_view = None              # genomic columns to open on (else the whole gene)
         self.label_boxes = []               # (rect, event info) of the event labels drawn
@@ -702,7 +701,7 @@ class StackedView(QWidget):
                 out.append((TRANSCRIPT, 34, r))
         out += [(DNA, 16, "pat"), (SCORES, 44, "pat"), (DELTA, 40, None)]
         for r in d.rows:
-            if r.group == "patient" and (r.rank == 1 or others):
+            if r.group == "patient" and (r.rank == self.sample_rank or others):
                 out.append((TRANSCRIPT, 34, r))
         return out
 
@@ -741,7 +740,8 @@ class StackedView(QWidget):
 
     # --- tiles ------------------------------------------------------------------------------
     def _layout(self):
-        return (id(self.data), self.show_alternatives, self.show_spliceai_alternatives, self.focus, self._legend[2],
+        return (id(self.data), self.show_alternatives, self.show_spliceai_alternatives, self.focus, self.sample_rank,
+                self._legend[2],
                 self.devicePixelRatioF())
 
     def _clear_tiles(self):
@@ -883,7 +883,7 @@ class StackedView(QWidget):
             rect = QRectF(0, y, self.width(), h)
             if kind == EVENTS:
                 event_labels(p, rect, self.data, self.x_of, self.label_boxes, self.show_origin)
-            row_label(p, rect, kind, payload, self.data, scale, top)
+            row_label(p, rect, kind, payload, self.data, menu=True)
             y += h + ROW_GAP
 
     def tiles_ready(self):
@@ -917,14 +917,63 @@ class StackedView(QWidget):
             self._moved = False
 
     def mouseReleaseEvent(self, event):
+        if self._drag is not None and not self._moved and self._pick_sample(event):
+            self._drag = None
+            return
         if self._drag is not None and not self._moved:
             c = min(max(self.col_at(event.position().x()), 0), self.data.n - 1)
             self.details.emit(self.full_details(c, event.position().y()))
         self._drag = None
 
     def mouseDoubleClickEvent(self, event):
+        """A gentle zoom in (x2) around the pointer; the whole gene is the corner button's."""
         if event.button() == Qt.LeftButton:
+            x = event.position().x()
+            anchor = self.first + x * self.cols_per_px
+            self.cols_per_px /= 2
+            self._clamp()
+            self.first = anchor - x * self.cols_per_px
+            self._clamp()
+            self.update()
+
+    def is_whole(self):
+        return self.first <= 0 and self.first + self.width() * self.cols_per_px >= self.data.n - 1
+
+    def toggle_whole(self):
+        """The whole gene, or back to where the view was before it."""
+        if self.is_whole() and self._before_whole:
+            self.first, self.cols_per_px = self._before_whole
+            self._before_whole = None
+            self._clamp()
+            self.update()
+        else:
+            self._before_whole = (self.first, self.cols_per_px)
             self.fit()
+
+    def patients(self):
+        return [r for r in self.data.rows if r.group == "patient"]
+
+    def set_sample(self, rank):
+        if rank != self.sample_rank:
+            self.sample_rank = rank
+            self.update()
+            self.sample_changed.emit(rank)
+
+    def _pick_sample(self, event):
+        """A click on a sample candidate's name: a list of every candidate. True if it was one."""
+        kind, payload, _ = self._row_at(event.position().y())
+        if kind != TRANSCRIPT or payload.group != "patient" or len(self.patients()) < 2:
+            return False
+        if event.position().x() > QFontMetrics(view_font()).horizontalAdvance(payload.name) + 160:
+            return False
+        menu = QMenu(self)
+        for r in self.patients():
+            action = menu.addAction(r.name + (f"  ({r.relative:.3f})" if r.relative is not None else ""))
+            action.setCheckable(True)
+            action.setChecked(r.rank == self.sample_rank)
+            action.triggered.connect(lambda _=False, k=r.rank: self.set_sample(k))
+        menu.exec(event.globalPosition().toPoint())
+        return True
 
     def mouseMoveEvent(self, event):
         x, y = event.position().x(), event.position().y()

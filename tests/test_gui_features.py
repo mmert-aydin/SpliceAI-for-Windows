@@ -326,4 +326,35 @@ w.close()
 check("closing during a run -> 'Yes' stops the run cleanly, then closes",
       not w.isVisible() and not worker.isRunning(), f"{time.time() - t0:.1f}s")
 
+# Scrolling a page down past a table: the wheel turn over the table's sideways bar doesn't slide its columns.
+# (Passing the turn on to the page is Qt's for real wheel events; a sent one stops where it is ignored.)
+from PySide6.QtCore import QPoint, QPointF  # noqa: E402
+from PySide6.QtGui import QWheelEvent  # noqa: E402
+from PySide6.QtWidgets import QTableWidget  # noqa: E402
+
+from spliceai_gui import theme  # noqa: E402
+
+theme.apply_theme(app)
+table = QTableWidget(2, 40)            # forty columns: a sideways bar
+table.resize(500, 160)
+table.show()
+app.processEvents()
+bar = table.horizontalScrollBar()
+
+
+def turn(widget, dx, dy, modifiers=Qt.NoModifier):
+    event = QWheelEvent(QPointF(5, 5), QPointF(widget.mapToGlobal(QPoint(5, 5))), QPoint(0, 0), QPoint(dx, dy),
+                        Qt.NoButton, modifiers, Qt.NoScrollPhase, False)
+    app.sendEvent(widget, event)
+    app.processEvents()
+    return event
+
+
+plain = turn(bar, 0, -120)
+check("a plain wheel turn over a table's sideways bar leaves the columns where they are (the page scrolls)",
+      bar.value() == 0 and not plain.isAccepted(), str(bar.value()))
+turn(bar, -120, 0)
+check("a sideways swipe (touchpad, tilt wheel) still moves the bar", bar.value() > 0, str(bar.value()))
+table.close()
+
 helpers.finish()

@@ -618,6 +618,7 @@ class MainWindow(QMainWindow):
 
         row = QHBoxLayout()
         load_btn = QPushButton(t("Load file..."))
+        load_btn.setObjectName("stepButton")
         load_btn.setToolTip(t("Open a VCF file -- or drag one from Explorer anywhere onto this window."))
         load_btn.clicked.connect(self._on_load_file)
         row.addWidget(load_btn)
@@ -636,6 +637,7 @@ class MainWindow(QMainWindow):
         row.addWidget(self.about_vcf_button)
 
         self.check_compat_button = QPushButton(t("Check compatibility"))
+        self.check_compat_button.setObjectName("stepButton")
         self.check_compat_button.clicked.connect(self._on_check_compatibility)
         row.addWidget(self.check_compat_button)
         self.compat_help_button = self._make_help_button(t("Check compatibility"), COMPAT_HELP_TEXT)
@@ -1154,8 +1156,8 @@ class MainWindow(QMainWindow):
         if (isinstance(sizes, list) and len(sizes) == self.panes.count()
                 and all(isinstance(n, int) and n > 0 for n in sizes)):
             self.panes.setSizes(sizes)
-            # Saved while Advanced settings were open: they start closed.
-            self._fit_settings_pane()
+            # Saved while Advanced settings were open (or at another window size): they start closed, and the
+            # pane is fitted to its contents once the window is shown (showEvent).
 
     def _save_settings(self):
         if self.use_precomputed_radio.isChecked():
@@ -1427,6 +1429,14 @@ class MainWindow(QMainWindow):
         self.advanced_button.setText(t("Hide advanced settings") if checked else t("Advanced settings..."))
         if not checked:
             self._fit_settings_pane()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # The Settings pane at its contents' height, whatever was saved or the default gave it -- once the window
+        # is laid out, as the splitter's sizes mean nothing before.
+        if not getattr(self, "_fitted_once", False):
+            self._fitted_once = True
+            QTimer.singleShot(0, self._fit_settings_pane)
 
     def _fit_settings_pane(self):
         """Opening Advanced settings makes the Settings pane taller; closing them

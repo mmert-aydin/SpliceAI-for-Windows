@@ -194,6 +194,19 @@ check("...and restored next time the window opens", w.panes.sizes() == dragged,
       str(w.panes.sizes()))
 
 settings = config.load()
+settings["pane_sizes"] = [300, 150, 700]     # saved with the Settings pane far taller than its contents
+config.save(settings)
+w.close()
+w = MainWindow()
+w.resize(*WINDOW)
+w.show()
+for _ in range(3):
+    app.processEvents()
+need = w.panes.widget(2).sizeHint().height()
+check("the Settings pane opens at its contents' height, the rest going to the results",
+      w.panes.sizes()[2] <= need + 2, f"{w.panes.sizes()} need {need}")
+
+settings = config.load()
 settings["pane_sizes"] = [0, 0]          # an older or hand-edited settings file
 config.save(settings)
 w.close()

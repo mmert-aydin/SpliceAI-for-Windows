@@ -39,14 +39,15 @@ class GeneImportDialog(QDialog):
         saved_row.addWidget(self.delete_saved_button)
         layout.addLayout(saved_row)
 
-        layout.addWidget(QLabel(
-            t("Paste gene symbols below, one per line or separated by commas or spaces (for example, copied from an HPO "
-              "phenotype gene list):")
-        ))
+        intro = QLabel(t("Paste gene symbols below, one per line or separated by commas or spaces (for example, copied "
+                         "from an HPO phenotype gene list):"))
+        intro.setWordWrap(True)         # wraps on a small screen instead of widening the dialog
+        layout.addWidget(intro)
 
         self.paste_box = QPlainTextEdit()
         self.paste_box.setPlaceholderText(t("BRCA1, BRCA2\nANKRD26\nTP53 ..."))
         self.paste_box.textChanged.connect(self._on_text_changed)
+        self.paste_box.setMinimumHeight(60)
         layout.addWidget(self.paste_box, stretch=1)
 
         check_row = QHBoxLayout()
@@ -65,6 +66,7 @@ class GeneImportDialog(QDialog):
         self.invalid_box.setReadOnly(True)
         self.invalid_box.setStyleSheet("color: #b00020;")
         self.invalid_box.setMaximumHeight(110)
+        self.invalid_box.setMinimumHeight(40)     # two lines: the dialog fits a short screen
         layout.addWidget(self.invalid_box)
 
         layout.addWidget(QLabel(t("Recognized:")))
@@ -72,6 +74,7 @@ class GeneImportDialog(QDialog):
         self.valid_box.setReadOnly(True)
         self.valid_box.setStyleSheet("color: #1a7f37;")
         self.valid_box.setMaximumHeight(110)
+        self.valid_box.setMinimumHeight(40)     # two lines: the dialog fits a short screen
         layout.addWidget(self.valid_box)
 
         button_row = QHBoxLayout()

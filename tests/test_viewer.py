@@ -401,9 +401,48 @@ QTest.mousePress(w.stacked, Qt.LeftButton, Qt.NoModifier, QPoint(400, top + 60))
 QTest.mouseMove(w.stacked, QPoint(300, top + 60))
 QTest.mouseRelease(w.stacked, Qt.LeftButton, Qt.NoModifier, QPoint(300, top + 60))
 panned = w.stacked.first > first
+cpp = w.stacked.cols_per_px
 QTest.mouseDClick(w.stacked, Qt.LeftButton, Qt.NoModifier, QPoint(300, top + 60))
-check("drag pans; double-click shows the whole gene again", panned and w.stacked.visible() == (0, w.stacked.data.n - 1),
-      f"{first} -> {w.stacked.first}")
+check("drag pans; double-click zooms in gently", panned and abs(w.stacked.cols_per_px - max(cpp / 2, 1 / 32)) < cpp,
+      f"{first} -> {w.stacked.first}, {cpp} -> {w.stacked.cols_per_px}")
+before = (w.stacked.first, w.stacked.cols_per_px)
+w.whole_button.click()
+whole = w.stacked.visible() == (0, w.stacked.data.n - 1)
+w.whole_button.click()
+check("the corner button shows the whole gene, then goes back", whole and (w.stacked.first, w.stacked.cols_per_px) == before,
+      f"{before} -> {(w.stacked.first, w.stacked.cols_per_px)}")
+if len(w.stacked.patients()) > 1:
+    w.set_candidate(2)
+    shown = [r.rank for k, _, r in w.stacked.rows() if k == TRANSCRIPT and r.group == "patient"]
+    check("another sample candidate can be picked for the stacked view", w.stacked.sample_rank == 2 and 2 in shown,
+          str(shown))
+    w.set_candidate(1)
+    from types import SimpleNamespace
+
+    from PySide6.QtGui import QFontMetrics
+
+    from spliceai_gui.stacked_view import row_label
+
+    written = []
+    fake = SimpleNamespace(fontMetrics=lambda: QFontMetrics(view_font()), fillRect=lambda *a: None,
+                           setPen=lambda *a: None, drawText=lambda *a: written.append(a[-1]))
+    sample = w.stacked.patients()[0]
+    row_label(fake, QRectF(0, 0, 800, 34), TRANSCRIPT, sample, w.stacked.data, menu=True)
+    row_label(fake, QRectF(0, 0, 800, 34), TRANSCRIPT, sample, w.stacked.data)
+    check("a sample's name ends in ▾ on screen (a click lists the others), never in an exported image",
+          written[0].endswith("▾") and "▾" not in written[1], str(written))
+
+# A maximized window is never shrunk by the fit-to-screen rule (it runs again when a window comes back).
+from spliceai_gui import theme as _theme  # noqa: E402
+
+w.showMaximized()
+app.processEvents()
+size = w.size()
+_theme.fit_to_screen(w)
+check("a maximized window is left as it is by the fit-to-screen rule", w.isMaximized() and w.size() == size,
+      f"{size} -> {w.size()}")
+w.showNormal()
+app.processEvents()
 ref_row = next(r for r in w.stacked.data.rows if r.group == "reference")
 cds_cols = sorted(w.stacked.data.columns_of(*result.gene.canonical.cds))
 check("the reference transcript knows its coding part (UTRs drawn thinner)",

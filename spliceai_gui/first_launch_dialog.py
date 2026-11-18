@@ -19,7 +19,9 @@ Decline above in any way; see license_dialog.py.
 """
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QFontDatabase
-from PySide6.QtWidgets import QApplication, QComboBox, QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import (
+    QApplication, QComboBox, QDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout,
+)
 
 from . import config, i18n
 from .i18n import N_, t
@@ -117,7 +119,12 @@ class FirstLaunchDialog(QDialog):
         self.body_label = QLabel()
         self.body_label.setTextFormat(Qt.RichText)
         self.body_label.setWordWrap(True)
-        layout.addWidget(self.body_label)
+        # In a scroll area: on a short screen (a laptop at 150 %) the text scrolls and the buttons stay in sight.
+        self.body_scroll = QScrollArea()
+        self.body_scroll.setWidgetResizable(True)
+        self.body_scroll.setFrameShape(QFrame.NoFrame)
+        self.body_scroll.setWidget(self.body_label)
+        layout.addWidget(self.body_scroll, stretch=1)
 
         self.contact_label = QLabel()
         self.contact_label.setTextFormat(Qt.RichText)
@@ -162,13 +169,26 @@ class FirstLaunchDialog(QDialog):
         self.full_license_button.setText(t("Read the full license..."))
         self.decline_button.setText(t("Decline"))
         self.accept_button.setText(t("I have read and accept the terms"))
-        # Wrapped text doesn't make the window taller by itself (the Turkish one is longer, and the language can
-        # change while it is open): never shorter than the text needs at this width.
+        if self.isVisible():
+            self._fit_text()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._fit_text()
+
+    def _fit_text(self):
+        """Wrapped text doesn't make the window taller by itself (the Turkish one is longer, and the language can
+        change while it is open): as tall as the whole text needs, so it never scrolls on a screen it fits -- on a
+        shorter one the window is the screen's height and the text scrolls (theme.fit_to_screen). Measured once
+        shown, at the text's real width."""
+        from .theme import fit_to_screen
+
         self.layout().activate()
-        need = self.layout().totalHeightForWidth(self.width())
-        self.setMinimumHeight(need)
-        if self.height() < need:
-            self.resize(self.width(), need)
+        view = self.body_scroll.viewport()
+        extra = self.body_label.heightForWidth(view.width()) - view.height()
+        if extra > 0:
+            self.resize(self.width(), self.height() + extra)
+            fit_to_screen(self)
 
     def _on_language_changed(self):
         """Takes effect at once: nothing else of the program is built yet (main.py imports it after this)."""

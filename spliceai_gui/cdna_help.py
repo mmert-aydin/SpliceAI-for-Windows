@@ -52,9 +52,10 @@ PARAMETERS = [
      t("The shortest intron a predicted transcript may have."),
      t("A higher value excludes short introns and, with them, some cryptic sites close to an exon. A lower value "
        "allows very short stretches to be spliced out, which rarely occurs in reality.")),
-    (t("Apply by default from"), "10 bp",
+    (t("Apply by default from"), "3 bp",
      t("Differences of this size or larger found by Check compatibility, as well as all inversions and "
-       "duplications, are selected under Apply. Smaller differences are not selected, because they often represent "
+       "duplications, are selected under Apply; with none of those, SNVs are selected too. Other smaller "
+       "differences are not selected, because they often represent "
        "sequencing noise or known polymorphisms (these are scored in the VCF tab)."),
      t("A higher value selects fewer differences by default; a lower value selects more. Each difference can still "
        "be selected or cleared individually.")),
@@ -216,8 +217,9 @@ CHECK_HELP_TEXT = (
       "leftmost equivalent position, and each difference is labelled by type. Location gives its position in the "
       "canonical transcript, Inserted the inserted bases (shortened in the middle; hover to see all of them, "
       "right-click to copy them), and Origin the source of those bases. Only the differences selected under Apply "
-      "are used to build the sample's sequence: by default, those of 10 bp or more and all inversions and "
-      "duplications, because smaller differences often represent sequencing noise or known polymorphisms. The "
+      "are used to build the sample's sequence: by default, those of 3 bp or more and all inversions and "
+      "duplications (and every SNV when there is none of those), because smaller differences often represent "
+      "sequencing noise or known polymorphisms. The "
       "selection can be changed as needed.\n"
       "\n") + NOTICES
 )

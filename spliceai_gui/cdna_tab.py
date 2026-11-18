@@ -237,6 +237,7 @@ class CdnaTab(QWidget):
         p.addWidget(self.sequence_edit)
         row = QHBoxLayout()
         load = QPushButton(t("Load FASTA..."))
+        load.setObjectName("stepButton")
         load.clicked.connect(self._on_load_fasta)
         row.addWidget(load)
         clear = QPushButton(t("Clear"))
@@ -252,10 +253,10 @@ class CdnaTab(QWidget):
         self.input_tabs.addTab(paste, t("Paste sequence"))
         self.input_tabs.addTab(self._build_from_coordinates(), t("From coordinates"))
         g.addWidget(self.input_tabs)
-        # The next step once a sequence is in: right under it, in the accent colour.
+        # The next step once a sequence is in: right under it, in the input steps' colour (theme.STEP).
         row = QHBoxLayout()
         self.check_button = QPushButton(t("Check compatibility"))
-        self.check_button.setObjectName("runButton")
+        self.check_button.setObjectName("stepButton")
         self.check_button.clicked.connect(self._on_check)
         row.addWidget(self.check_button)
         row.addWidget(make_help_button(self, t("Check compatibility"), CHECK_HELP_TEXT))
@@ -280,6 +281,7 @@ class CdnaTab(QWidget):
         v.addWidget(self.coords_edit)
         row = QHBoxLayout()
         self.generate_button = QPushButton(t("Generate sequence"))
+        self.generate_button.setObjectName("stepButton")
         self.generate_button.setToolTip(t("The sample sequence of the gene's region: the reference with these events. "
                                         "It goes into the paste box, and the events into the differences table."))
         self.generate_button.clicked.connect(self._on_generate)
@@ -388,7 +390,8 @@ class CdnaTab(QWidget):
         self.apply_min_size.setValue(settings["cdna_apply_min_size"])
         self.apply_min_size.setSuffix(t(" bp"))
         self.apply_min_size.setToolTip(t("Differences this long or longer (and every inversion and duplication) are "
-                                       "ticked under Apply when the check finds them."))
+                                       "ticked under Apply when the check finds them. With none of those, SNVs are "
+                                       "ticked too."))
         self.apply_min_size.valueChanged.connect(self._reapply_defaults)
         row.addWidget(self.apply_min_size)
         self.advanced = QPushButton(t("Advanced"))
@@ -510,19 +513,32 @@ class CdnaTab(QWidget):
         self.local_label.setWordWrap(True)
         self.local_label.setStyleSheet(theme.STATUS_MUTED)
         # Spec 16 item 4: a run sent from the VCF tab says which variant, its genotype, and the VCF tab's scores
-        # next to the engine's; a "?" says why they differ where they do.
+        # next to the engine's -- under the table, folded into "Details"; the "?" (why they differ) stays in sight.
         self.vcf_header = QWidget()
-        vh = QHBoxLayout(self.vcf_header)
-        vh.setContentsMargins(0, 0, 0, 0)
+        vv = QVBoxLayout(self.vcf_header)
+        vv.setContentsMargins(0, 0, 0, 0)
+        vh = QHBoxLayout()
+        self.vcf_details_button = QToolButton()
+        self.vcf_details_button.setText(t("Details"))
+        self.vcf_details_button.setCheckable(True)
+        self.vcf_details_button.setArrowType(Qt.RightArrow)
+        self.vcf_details_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.vcf_details_button.setToolTip(t("The variant sent from the VCF tab, its genotype, and the VCF tab's scores "
+                                           "next to this tab's."))
+        vh.addWidget(self.vcf_details_button)
+        self.vcf_why = make_notice_button(self, "caution", t("Why the VCF tab's scores differ"))
+        vh.addWidget(self.vcf_why)
+        vh.addStretch(1)
+        vv.addLayout(vh)
         self.vcf_label = QLabel("")
         self.vcf_label.setWordWrap(True)
         self.vcf_label.setTextFormat(Qt.RichText)
         self.vcf_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        vh.addWidget(self.vcf_label, stretch=1)
-        self.vcf_why = make_notice_button(self, "caution", t("Why the VCF tab's scores differ"))
-        vh.addWidget(self.vcf_why, alignment=Qt.AlignTop)
+        self.vcf_label.setVisible(False)
+        vv.addWidget(self.vcf_label)
+        self.vcf_details_button.toggled.connect(lambda on: (
+            self.vcf_details_button.setArrowType(Qt.DownArrow if on else Qt.RightArrow), self.vcf_label.setVisible(on)))
         self.vcf_header.setVisible(False)
-        g.addWidget(self.vcf_header)
         self.results_table = QTableWidget(0, len(ca.COLUMNS))
         self.results_table.setHorizontalHeaderLabels(ca.COLUMNS)
         self.results_table.horizontalHeader().setSectionResizeMode(len(ca.COLUMNS) - 1, QHeaderView.Stretch)
@@ -531,6 +547,7 @@ class CdnaTab(QWidget):
         self.results_table.setMinimumHeight(260)
         self.results_table.cellClicked.connect(self._on_row_clicked)
         g.addWidget(self.results_table)
+        g.addWidget(self.vcf_header)
         # Spec 16 item 1: one line per applied event under the table; a click opens the viewer there.
         self.events_label = QLabel("")
         self.events_label.setWordWrap(True)
@@ -927,6 +944,9 @@ class CdnaTab(QWidget):
 
     def _check_done(self, compat):
         self.check_button.setEnabled(True)
+        # ponytail: at a fractional display scale (150%) Qt left this button half-repainted after "Generate
+        # sequence" re-laid the tab out; one full repaint of the tab. Drop it if a Qt update fixes partial repaints.
+        self.update()
         self.run_anyway.setChecked(False)          # asked again for every new check
         if compat.found:
             # A single position was given: the range found goes into the field (without undoing the check).
@@ -1005,8 +1025,7 @@ class CdnaTab(QWidget):
     def _reapply_defaults(self, size):
         if self.compat is None:
             return
-        for e in self.compat.alignment.events:
-            e.apply = align.default_apply(e, size)
+        align.set_default_apply(self.compat.alignment.events, size)
         self._check_done(self.compat)
 
     def _update_chosen(self):

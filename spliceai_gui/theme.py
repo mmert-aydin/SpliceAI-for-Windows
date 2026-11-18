@@ -66,6 +66,9 @@ ORANGE = "#efc3a0"
 ORANGE_DARK = "#e6ad82"
 ORANGE_SOFT = "#fae6d6"
 ORANGE_LINE = "#efcdb2"
+STEP = "#d6e6f5"           # pale blue: the input steps (load a file, generate, check)
+STEP_DARK = "#c0d7ee"
+STEP_LINE = "#9fbfdf"
 
 # Consolas and Cascadia Mono ship with Windows; Courier New is the last resort.
 MONO_FAMILIES = ("Consolas", "Cascadia Mono", "Courier New")
@@ -171,6 +174,11 @@ QPushButton#runButton:hover {{ background: {TEAL_DARK}; border-color: {TEAL_DARK
 QPushButton#runButton:disabled {{
     background: {SURFACE_2}; border-color: {LINE}; color: {INK_3};
 }}
+
+/* The input steps -- load a file or generate a sequence, then check it -- in pale blue, so the way in stands out. */
+QPushButton#stepButton {{ background: {STEP}; border-color: {STEP_LINE}; color: {INK}; font-weight: 600; }}
+QPushButton#stepButton:hover {{ background: {STEP_DARK}; }}
+QPushButton#stepButton:disabled {{ background: {SURFACE_2}; border-color: {LINE}; color: {INK_3}; }}
 
 /* Genes to score: the choice Run waits for; the chosen one gets a dark frame. */
 QPushButton#allGenesButton {{ background: {ORANGE}; border-color: {ORANGE_DARK}; color: {INK}; font-weight: 600; }}
@@ -301,3 +309,64 @@ def apply_theme(app):
     """Applies the stylesheet to the whole application. Called once from
     main(), before any window is built."""
     app.setStyleSheet(STYLESHEET)
+    app._fit_on_show = _fitter()        # kept on the app, or it is collected
+    app.installEventFilter(app._fit_on_show)
+
+
+# --- every window fits its screen ---------------------------------------------------------------------
+TITLE_BAR = 40      # logical px a window's title bar and frame take beyond its size (Windows, any scaling)
+SIDE_FRAME = 16
+
+
+def fitted_size(size, width, height):
+    """The size a window of `size` opens at on a screen whose free area (without the taskbar) is width x height."""
+    from PySide6.QtCore import QSize
+
+    return QSize(min(size.width(), width - SIDE_FRAME), min(size.height(), height - TITLE_BAR))
+
+
+def fit_to_screen(window):
+    """A window opening larger than its screen (a help text, a dialog sized for a big monitor, a small laptop at
+    150 %) is made to fit and kept on the screen; its contents scroll or wrap."""
+    screen = window.screen()
+    if screen is None or window.isMaximized() or window.isFullScreen():
+        return
+    free = screen.availableGeometry()
+    size = fitted_size(window.size(), free.width(), free.height())
+    if size == window.size():
+        return
+    window.resize(size)
+    x = min(max(window.x(), free.left()), free.right() - window.width() - SIDE_FRAME)
+    y = min(max(window.y(), free.top()), free.bottom() - window.height() - TITLE_BAR)
+    window.move(x, y)
+
+
+def wheel_to_page(bar, event):
+    """True if a wheel turn reaching a sideways scroll bar should scroll the page instead: Qt turns a plain
+    (vertical) turn over a table's sideways bar into a sideways scroll, so scrolling down a page stopped there and
+    slid the table's columns. Shift + wheel and a touchpad's sideways swipe still move the bar."""
+    from PySide6.QtCore import Qt
+
+    return (bar.orientation() == Qt.Horizontal and not event.angleDelta().x() and event.angleDelta().y() != 0
+            and not event.modifiers() & Qt.ShiftModifier)
+
+
+def _fitter():
+    from PySide6.QtCore import QEvent, QObject
+    from PySide6.QtWidgets import QDialog, QMainWindow, QScrollBar
+
+    class AppRules(QObject):
+        """Every window fits its screen when it opens; a sideways scroll bar leaves a plain wheel turn to the page."""
+
+        def eventFilter(self, obj, event):
+            kind = event.type()
+            # Not a spontaneous Show: that is the window coming back from the taskbar, at the size it was left.
+            if (kind == QEvent.Show and not event.spontaneous() and isinstance(obj, (QDialog, QMainWindow))
+                    and obj.isWindow()):
+                fit_to_screen(obj)
+            elif kind == QEvent.Wheel and isinstance(obj, QScrollBar) and wheel_to_page(obj, event):
+                event.ignore()      # handled here, not accepted: Qt passes it on to the widgets around it
+                return True
+            return False
+
+    return AppRules()

@@ -1,6 +1,8 @@
 """Spec 17 item 5: the whole program and the viewer at 1280x720, 1366x768,
-1600x900 and 1920x1080, at 100%, 125%, 150% and 175% Windows scaling: nothing
-cut off, text sharp. A screenshot of each view at each combination goes to
+1600x900 and 1920x1080, at 100%, 125%, 150% and 175% Windows scaling, and at
+2560x1440 and 3840x2160 up to 200%: nothing cut off, text sharp; the Settings
+pane no taller than its contents; every dialog and every "(?)" help popup
+fitting the screen. A screenshot of each view at each combination goes to
 docs/phase_reports/phase_13_screens/.
 
 Each scaling runs in its own process on the real Windows platform, whose fonts
@@ -21,8 +23,13 @@ import tempfile
 import helpers
 from helpers import check
 
-SCREENS = ((1280, 720), (1366, 768), (1600, 900), (1920, 1080))
-SCALES = (1.0, 1.25, 1.5, 1.75)
+SCREENS = ((1280, 720), (1366, 768), (1600, 900), (1920, 1080), (2560, 1440), (3840, 2160))
+SCALES = (1.0, 1.25, 1.5, 1.75, 2.0)
+
+
+def offered(width, scale):
+    """Windows offers 200% only on the large screens."""
+    return scale <= 1.75 or width >= 2560
 OUT = helpers.REPO / "docs" / "phase_reports" / "phase_13_screens"
 TASKBAR = 48            # px of the screen the Windows taskbar takes
 
@@ -39,7 +46,7 @@ def child(bundle_path, scale, save):
     import numpy as np
     from PySide6.QtCore import QPoint, Qt
     from PySide6.QtGui import QColor, QImage, QPainter
-    from PySide6.QtWidgets import QAbstractButton, QApplication, QLabel, QScrollArea, QToolBar
+    from PySide6.QtWidgets import QAbstractButton, QAbstractScrollArea, QApplication, QLabel, QScrollArea, QToolBar
 
     from spliceai_gui import theme
     from spliceai_gui.main_window import MainWindow
@@ -78,8 +85,9 @@ def child(bundle_path, scale, save):
             if not text.strip():
                 continue
             area = c.parent()
-            while area is not None and not isinstance(area, QScrollArea):
-                area = area.parent()
+            while area is not None and area is not window and not isinstance(area, QScrollArea):
+                area = area.parent()        # (a dialog's parent is in another window: stop at this one)
+            area = None if area is window else area
             box = area.viewport() if area is not None else window
             right = c.mapTo(box, QPoint(c.width(), 0)).x()
             if right > box.width() + 1:
@@ -98,7 +106,10 @@ def child(bundle_path, scale, save):
     scroll = w.centralWidget()
     if abs(w.devicePixelRatioF() - scale) > 0.01:
         report["ratio"] = [f"running at {w.devicePixelRatioF()}, not {scale}"]
+    popups = make_popups(app, w, tab, viewer, settle)
     for sw, sh in SCREENS:
+        if not offered(sw, scale):
+            continue
         lw, lh = round(sw / scale), round((sh - TASKBAR) / scale)
         problems = []
         name = f"{sw}x{sh}_{round(scale * 100)}"
@@ -114,6 +125,10 @@ def child(bundle_path, scale, save):
             if scroll.horizontalScrollBar().maximum():
                 problems.append(f"{label}: scrolls {scroll.horizontalScrollBar().maximum()} px sideways")
             problems += cut_off(w, label)
+            if label == "vcf":
+                need = w.panes.widget(2).sizeHint().height()
+                if w.panes.sizes()[2] > need + 2:
+                    problems.append(f"vcf: the Settings pane is {w.panes.sizes()[2]} px, its contents {need}")
             if save:
                 w.grab().save(str(OUT / f"{name}_{label}.png"))
             # What is folded away has to fit as well.
@@ -133,7 +148,23 @@ def child(bundle_path, scale, save):
                 if save:
                     w.grab().save(str(OUT / f"{name}_compatibility.png"))
                 scroll.verticalScrollBar().setValue(0)
-        for index, label in ((0, "schematic"), (1, "stacked")):
+        for title, d, opens in popups:
+            hint = d.minimumSizeHint()
+            if hint.width() > lw or hint.height() > lh:
+                problems.append(f"{title}: needs at least {hint.width()}x{hint.height()}, the screen has {lw}x{lh}")
+                continue
+            # Opened on this screen it is fitted to it (theme.fit_to_screen does that for every window).
+            d.resize(theme.fitted_size(opens, lw, lh))
+            settle(2)
+            if d.width() > lw or d.height() > lh:
+                problems.append(f"{title}: opens at {d.width()}x{d.height()}, the screen has {lw}x{lh}")
+            elif d.size() == opens and (title == "welcome" or title.startswith("help")):
+                # A text that fits the screen is shown whole: no scroll bar.
+                bars = [a for a in d.findChildren(QAbstractScrollArea) if a.verticalScrollBar().isVisible()]
+                if bars:
+                    problems.append(f"{title}: scrolls although the screen has room for all of it")
+            problems += cut_off(d, title)
+        for index, label in ((0, "schematic"), (1, "stacked"), (2, "sequences")):
             viewer.tabs.setCurrentIndex(index)
             settle()
             if index == 1:
@@ -180,11 +211,71 @@ def child(bundle_path, scale, save):
             if save:
                 viewer.grab().save(str(OUT / f"{name}_{label}.png"))
         report[name] = problems
+    for _, d, _ in popups:
+        d.close()
     print("REPORT " + json.dumps(report), flush=True)
     viewer.close()
     from PySide6.QtWidgets import QMessageBox
     QMessageBox.question = staticmethod(lambda *a, **k: QMessageBox.Yes)
     w.close()
+
+
+def make_popups(app, w, tab, viewer, settle):
+    """[(title, dialog, fixed)]: every dialog the program opens, and one message box per "(?)" help (its text is
+    the button's tooltip, as a click shows it). fixed: a message box, which can't be made smaller than it is."""
+    from types import SimpleNamespace
+
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QToolButton
+
+    from spliceai_gui.help_button import help_dialog
+
+    from spliceai_gui.cdna_tab import IntroDialog
+    from spliceai_gui.download_dialog import ReferenceDownloadDialog
+    from spliceai_gui.first_launch_dialog import FirstLaunchDialog
+    from spliceai_gui.gene_import_dialog import GeneImportDialog
+    from spliceai_gui.license_dialog import LicenseDialog
+    from spliceai_gui.mane_download_dialog import ManeDownloadDialog
+    from spliceai_gui.refdb_wizard import RefdbDialog, RefdbWizard
+    from spliceai_gui.snpeff_download_dialog import SnpEffDownloadDialog
+    from spliceai_gui.spliceai_setup_dialog import SpliceAISetupDialog
+    from spliceai_gui.transcript_effect_dialog import TranscriptEffectDialog
+    from spliceai_pipeline import vcf_bridge
+
+    gene = tab.gene
+    row = SimpleNamespace(chrom="chr17", pos=7674221, ref="G", alt="A", variant_id="chr17:7674221:G:A", gene=gene.name,
+                          source="", ds_ag=0.0, ds_al=0.0, ds_dg=0.0, ds_dl=0.0)
+    vcf = "\n".join(["##fileformat=VCFv4.2", "\t".join("#CHROM POS ID REF ALT QUAL FILTER INFO FORMAT S".split()),
+                     "\t".join("chr17 7674221 . G A . . . GT 0/1".split())]) + "\n"
+    makers = [
+        ("welcome", lambda: FirstLaunchDialog(w)), ("licence", lambda: LicenseDialog(w)),
+        ("cDNA intro", lambda: IntroDialog(tab)), ("reference download", lambda: ReferenceDownloadDialog(w)),
+        ("MANE download", lambda: ManeDownloadDialog(w)), ("SnpEff download", lambda: SnpEffDownloadDialog(w)),
+        ("SpliceAI setup", lambda: SpliceAISetupDialog(w)), ("gene list", lambda: GeneImportDialog(w)),
+        ("database", lambda: RefdbDialog(w.refdb, w)), ("database wizard", lambda: RefdbWizard(w.refdb, w)),
+        ("transcript effect", lambda: TranscriptEffectDialog(
+            w, "hg38", [row], lambda r: ([gene], []), lambda r, g: [],
+            lambda r: vcf_bridge.genotype(vcf, r.chrom, r.pos, r.ref, r.alt), lambda g, n: (60, "estimate"), "masked")),
+    ]
+    out, seen = [], set()           # [(title, dialog, the size it opens at)]
+    for title, make in makers:
+        try:
+            d = make()
+        except Exception as exc:        # reported, so a dialog that can't be built here is seen, not skipped
+            print(f"{title}: could not be built here: {exc!r}", file=sys.stderr)
+            continue
+        out.append((title, d))
+    for window in (w, viewer):
+        for b in window.findChildren(QToolButton):
+            tip = b.toolTip()
+            if b.text().endswith("(?)") and tip and tip not in seen:
+                seen.add(tip)
+                out.append((f"help '{b.text()[:30]}'", help_dialog(window, b.text(), tip)))
+    for _, d in out:
+        d.setAttribute(Qt.WA_DontShowOnScreen)
+        d.show()
+    settle()
+    return [(title, d, d.size()) for title, d in out]
 
 
 def make_bundle(path):

@@ -44,7 +44,7 @@ MAX_GAP_CELLS = 40_000_000
 # this is one replacement (a delins or a rearrangement), not scattered changes.
 LOW_IDENTITY = 0.75
 END_MIN_IDENTITY = 0.90
-APPLY_MIN_SIZE = 10
+APPLY_MIN_SIZE = 3
 
 _COMPLEMENT = str.maketrans("ACGTN", "TGCAN")
 _CODE = np.full(256, 4, np.uint8)
@@ -512,9 +512,14 @@ def _event(fetch, chrom, ref_offset, q, r, ref_bases, alt_bases, inverted=False,
     return event
 
 
-def default_apply(event, min_size=APPLY_MIN_SIZE):
-    """Spec 6.2: events of min_size or more and every inversion and duplication."""
-    return event.kind in ("inversion", "duplication") or event.size >= min_size
+def set_default_apply(events, min_size=APPLY_MIN_SIZE):
+    """Spec 6.2: events of min_size or more and every inversion and duplication.
+    With none of those, the SNVs are ticked too: a lone SNV is the variant, not
+    noise around a larger change. Small events left unticked are reported by
+    cdna_analysis.check_notices()."""
+    large = [e.kind in ("inversion", "duplication") or e.size >= min_size for e in events]
+    for e, big in zip(events, large):
+        e.apply = big or (not any(large) and e.kind == "SNV")
 
 
 # --- what the events look like (spec 14 C8) --------------------------------------------------------
@@ -737,8 +742,7 @@ def align(query, ref, ref_offset, fetch, chrom, apply_min_size=APPLY_MIN_SIZE):
         result.notes.append(f"The {end_word} {len(seq) - last[1]:,} bases of the sequence don't match the reference next "
                             "to the aligned part; they are left out.")
     events += _events(fetch, chrom, ref_offset, diffs)
-    for e in events:
-        e.apply = default_apply(e, apply_min_size)
+    set_default_apply(events, apply_min_size)
     classify(events, ref, ref_offset)
     result.events = sorted(events, key=lambda e: (e.start, e.end))
     result.ref_start, result.ref_end = ref_offset + first_r, ref_offset + last_r - 1
@@ -779,8 +783,7 @@ def _align_short(query, ref, ref_offset, fetch, chrom, apply_min_size):
     result = Alignment(len(query), reverse, ref_offset + lo + skip, ref_offset + r_end - 1, 1, len(seq),
                        counts[0], counts[1], score, method="dynamic programming (parasail) over the whole region")
     result.events = _events(fetch, chrom, ref_offset, diffs)
-    for e in result.events:
-        e.apply = default_apply(e, apply_min_size)
+    set_default_apply(result.events, apply_min_size)
     classify(result.events, ref, ref_offset)
     if result.identity < END_MIN_IDENTITY:
         result.notes.append(f"Only {100 * result.identity:.1f}% identity at its best place: the sequence may not "

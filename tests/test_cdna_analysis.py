@@ -22,7 +22,7 @@ import numpy as np  # noqa: E402
 
 import sys  # noqa: E402
 
-from spliceai_pipeline import bedgraph, bundle, cdna_analysis as ca, haplotype, refdb, transcripts  # noqa: E402
+from spliceai_pipeline import align, bedgraph, bundle, cdna_analysis as ca, haplotype, refdb, transcripts  # noqa: E402
 from spliceai_pipeline.haplotype import Edit  # noqa: E402
 from spliceai_pipeline.tabix import TabixFile  # noqa: E402
 
@@ -119,6 +119,16 @@ kinds = sorted(e.kind for e in compat.alignment.events)
 check("check: both edits found; the 70 bp insertion applied by default, the SNV not",
       kinds == ["SNV", "insertion"] and [e.apply for e in sorted(compat.alignment.events, key=lambda e: e.kind)]
       == [False, True], f"{kinds}")
+notes = [text for _, text, _ in ca.check_notices(compat)]
+check("check: the SNV left out next to the insertion is named in a notice",
+      any("1 of 2 differences are not applied" in n for n in notes), str(notes))
+lone = [align.Event("SNV", 100, "A", "C", 100, 100, "C", 1), align.Event("deletion", 200, "AT", "A", 201, 201, "", 1)]
+align.set_default_apply(lone, 3)
+alone = [e.apply for e in lone]
+big = lone + [align.Event("deletion", 300, "ATTTT", "A", 301, 304, "", 4)]
+align.set_default_apply(big, 3)
+check("a lone SNV is applied by default, a 1 bp deletion is not; next to a 4 bp deletion neither is",
+      alone == [True, False] and [e.apply for e in big] == [False, False, True], f"{alone} {[e.apply for e in big]}")
 check("check: the report gives identity and the covered interval; the paste covers the whole gene, so no warning",
       any(line.startswith("Identity") for line in compat.report["lines"]) and not compat.report["problems"]
       and not compat.report["warnings"], str(compat.report)[:200])

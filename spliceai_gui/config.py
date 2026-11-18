@@ -56,7 +56,7 @@ DEFAULTS = {
     "cdna_threshold": 0.05,
     "cdna_min_exon": 3,
     "cdna_min_intron": 60,
-    "cdna_apply_min_size": 10,
+    "cdna_apply_min_size": 3,
     "cdna_top": 5,
     "cdna_low_concordance": 0.9,
     # A sample candidate whose differing sites all changed less than this is "weak evidence" (decided after Phase 8).

@@ -7,7 +7,8 @@ click handler, and the tooltip only previews the text.
 """
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QMessageBox, QToolButton
+from PySide6.QtGui import Qt as GuiQt     # its mightBeRichText (not in QtCore's Qt)
+from PySide6.QtWidgets import QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QTextBrowser, QToolButton, QVBoxLayout
 
 from .assets_paths import LOGO_PNG
 
@@ -26,11 +27,57 @@ def make_help_button(parent, dialog_title, help_text, font_size="10pt", logo=Fal
         f"QToolButton {{ color: palette(link); font-weight: bold; font-size: {font_size}; border: none; }}"
     )
     button.setToolTip(help_text)
-    if logo:
-        button.clicked.connect(lambda: show_help_with_logo(parent, dialog_title, help_text))
-    else:
-        button.clicked.connect(lambda: QMessageBox.information(parent, dialog_title, help_text))
+    button.clicked.connect(lambda: help_dialog(parent, dialog_title, help_text, logo=logo).exec())
     return button
+
+
+class _HelpDialog(QDialog):
+    def showEvent(self, event):
+        """Once shown, at the text's real width: as tall as the text, so it never scrolls on a screen it fits."""
+        from .theme import fit_to_screen
+
+        super().showEvent(event)
+        self.layout().activate()
+        view = self.body.viewport()
+        extra = int(self.body.document().size().height()) + 2 - view.height()
+        if extra > 0:
+            self.resize(self.width(), self.height() + extra)
+            fit_to_screen(self)
+
+
+def help_dialog(parent, title, text, logo=False, level=None):
+    """A help (or notice) text in a window: message-box wide, as tall as the text, and scrolling when the text is
+    taller than the screen (theme.fit_to_screen trims the window to it) -- a QMessageBox can't scroll, so a long
+    help ran off small screens."""
+    from . import theme
+
+    d = _HelpDialog(parent)
+    d.setWindowTitle(title)
+    v = QVBoxLayout(d)
+    row = QHBoxLayout()
+    if logo and LOGO_PNG.exists():
+        icon = QLabel()
+        icon.setPixmap(QPixmap(str(LOGO_PNG)).scaled(ABOUT_DIALOG_LOGO_SIZE, ABOUT_DIALOG_LOGO_SIZE,
+                                                      Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        row.addWidget(icon, alignment=Qt.AlignTop)
+    body = QTextBrowser()
+    body.setOpenExternalLinks(True)
+    body.setFrameShape(QTextBrowser.NoFrame)
+    body.setStyleSheet(f"background: transparent; color: {theme.CRIT if level == 'critical' else theme.INK};")
+    if GuiQt.mightBeRichText(text):     # as QMessageBox decided it
+        body.setHtml(text)
+    else:
+        body.setPlainText(text)
+    row.addWidget(body, stretch=1)
+    d.body = body
+    v.addLayout(row)
+    buttons = QDialogButtonBox(QDialogButtonBox.Ok)
+    buttons.accepted.connect(d.accept)
+    v.addWidget(buttons)
+    width = 560
+    body.document().setTextWidth(width - (ABOUT_DIALOG_LOGO_SIZE + 12 if logo else 0) - 24)
+    d.resize(width, int(body.document().size().height()) + 80)
+    return d
 
 
 def make_notice_button(parent, level, title):
@@ -45,8 +92,7 @@ def make_notice_button(parent, level, title):
     color = theme.CRIT if level == "critical" else theme.TEAL
     button.setStyleSheet(f"QToolButton {{ color: white; background: {color}; font-weight: bold; font-size: 10pt; "
                          "border: none; border-radius: 9px; min-width: 18px; min-height: 18px; }")
-    button.clicked.connect(lambda: (QMessageBox.warning if level == "critical" else QMessageBox.information)(
-        parent, title, button.toolTip()))
+    button.clicked.connect(lambda: help_dialog(parent, title, button.toolTip(), level=level).exec())
     button.setVisible(False)
     return button
 
@@ -72,18 +118,3 @@ def notice_icon(level):
     p.drawText(pixmap.rect(), Qt.AlignCenter, "!" if level == "critical" else "?")
     p.end()
     return QIcon(pixmap)
-
-
-def show_help_with_logo(parent, dialog_title, help_text):
-    box = QMessageBox(parent)
-    box.setWindowTitle(dialog_title)
-    box.setText(help_text)
-    box.setStandardButtons(QMessageBox.Ok)
-    if LOGO_PNG.exists():
-        pixmap = QPixmap(str(LOGO_PNG)).scaled(
-            ABOUT_DIALOG_LOGO_SIZE, ABOUT_DIALOG_LOGO_SIZE, Qt.KeepAspectRatio, Qt.SmoothTransformation,
-        )
-        box.setIconPixmap(pixmap)
-    else:
-        box.setIcon(QMessageBox.Information)
-    box.exec()

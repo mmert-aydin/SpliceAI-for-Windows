@@ -702,6 +702,18 @@ def check_notices(compat):
     out = [(CRITICAL, p, False) for p in compat.report["problems"] + checked["problems"]]
     out += [(CRITICAL, w, True) for w in checked["warnings"]]
     out += [(CAUTION, w, False) for w in compat.report["warnings"]]
+    events = compat.alignment.events
+    left = [e for e in events if not e.apply]
+    if left:
+        where = "; ".join(f"{e.kind} {e.start:,}" for e in left[:5]) + ("; ..." if len(left) > 5 else "")
+        if len(left) == len(events):
+            out.append((CRITICAL, tx("None of the {n} differences is applied ({where}): the sample would be predicted "
+                                     "as the reference. Tick them under Apply to include them.",
+                                     n=len(left), where=where), True))
+        else:
+            out.append((CAUTION, tx("{n} of {total} differences are not applied ({where}). Tick them under Apply to "
+                                    "include them.",
+                                    n=len(left), total=len(events), where=where), False))
     return out
 
 

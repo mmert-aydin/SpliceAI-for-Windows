@@ -21,7 +21,8 @@ import os
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton,
-    QScrollArea, QSizePolicy, QSplitter, QTabWidget, QTextBrowser, QToolBar, QVBoxLayout, QWidget,
+    QScrollArea, QSizePolicy, QSplitter, QStyle, QTabWidget, QTextBrowser, QToolBar, QToolButton, QVBoxLayout,
+    QWidget,
 )
 
 from spliceai_pipeline import bundle, cdna, cdna_analysis
@@ -55,12 +56,25 @@ SCORE_TRACKS_HELP_TEXT = (
     "Applied events are bands through every row in their type's colour (see the legend), labelled above the ruler "
     "with type, size, coordinates and place in the canonical transcript; an insertion is a line in the reference "
     "rows and the inserted bases in the sample's. \"Show origin\" outlines, dashed, where inserted bases come "
-    "from; \"Go to origin\" goes there. Focus shows only the reference, WT predicted 1 and sample 1 rows. The "
-    "delta row is scaled to the largest |delta| in view (written at its left); red ticks mark |delta| ≥ 0.1.\n\n"
-    "Mouse wheel: zoom (from the whole gene to single bases); drag: pan; double-click: the whole gene; hover: a "
-    "short tooltip; click (or Shift + hover): everything about the base or exon, in the panel on the right. "
+    "from; \"Go to origin\" goes there. Focus shows only the reference, WT predicted 1 and the chosen sample rows; "
+    "a click on a sample's name lists the other candidates. The delta row is scaled to the largest |delta| in "
+    "view; red ticks mark |delta| ≥ 0.1.\n\n"
+    "Mouse wheel: zoom (from the whole gene to single bases); drag: pan; double-click: zoom in; the button at the "
+    "bottom left: the whole gene and back; hover: a short tooltip; click (or Shift + hover): everything about the "
+    "base or exon, in the panel on the right. "
     "Annotated transcripts are drawn with their UTRs thinner than the coding part.")
 )
+
+
+class _CornerScroll(QScrollArea):
+    """A scroll area with a button kept at its bottom left, over the view."""
+    corner = None
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self.corner is not None:
+            self.corner.move(8, self.viewport().height() - self.corner.sizeHint().height() - 8)
+            self.corner.raise_()
 
 
 class ViewerWindow(QMainWindow):
@@ -120,6 +134,7 @@ class ViewerWindow(QMainWindow):
         self.stacked = StackedView(data)
         self.stacked.details.connect(self.show_details)
         self.stacked.focus = self.focus.isChecked()
+        self.stacked.sample_rank = self._candidate or 1
         self.stacked.start_view = self.start_view()
         page = QWidget()
         pl = QVBoxLayout(page)
@@ -139,15 +154,23 @@ class ViewerWindow(QMainWindow):
         self.orientation_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)   # never widens the view
         header.addWidget(self.orientation_label, stretch=1)
         self._update_orientation_label()
-        hint = QLabel(t("Wheel: zoom · drag: pan · double-click: whole gene · Shift + hover: details on the right"))
+        hint = QLabel(t("Wheel: zoom · drag: pan · double-click: zoom in · Shift + hover: details on the right"))
         hint.setStyleSheet(theme.STATUS_MUTED)
         hint.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         pl.addWidget(hint)
-        scroll = QScrollArea()
+        scroll = _CornerScroll()
         scroll.setWidgetResizable(True)
         scroll.setWidget(self.stacked)
+        self.whole_button = QToolButton(scroll)
+        self.whole_button.setIcon(self.style().standardIcon(QStyle.SP_TitleBarMaxButton))
+        self.whole_button.setToolTip(t("Whole gene, or back to the previous view"))
+        self.whole_button.setAutoRaise(False)
+        self.whole_button.clicked.connect(self._toggle_whole)
+        scroll.corner = self.whole_button
         pl.addWidget(scroll)
         self.tabs.addTab(page, t("Stacked view"))
+        self.stacked.sample_changed.connect(self.set_candidate)
+        self.stacked.moved.connect(self._update_whole_icon)
         # 3. The sequence comparison: built when first shown.
         self.sequences = None
         if result is not None and result.transcripts:
@@ -163,7 +186,17 @@ class ViewerWindow(QMainWindow):
                                       "view does it too)."))
         self.splitter = QSplitter(Qt.Horizontal)
         self.splitter.addWidget(self.tabs)
-        self.splitter.addWidget(self.details_panel)
+        side = QWidget()                          # the panel, headed by the gene's name
+        sl = QVBoxLayout(side)
+        sl.setContentsMargins(0, 0, 0, 0)
+        sl.setSpacing(4)
+        self.gene_heading = QLabel(data.gene)
+        self.gene_heading.setStyleSheet(f"font-size: 14pt; font-weight: 600; font-style: italic; color: {theme.INK}; "
+                                        f"padding: 2px 4px;")
+        self.gene_heading.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        sl.addWidget(self.gene_heading)
+        sl.addWidget(self.details_panel, stretch=1)
+        self.splitter.addWidget(side)
         self.splitter.setStretchFactor(0, 1)
         self.splitter.setStretchFactor(1, 0)
         self.splitter.setChildrenCollapsible(False)
@@ -198,13 +231,25 @@ class ViewerWindow(QMainWindow):
 
         self.sequences = SequenceView(self.data.result)
         self.sequences.set_candidate(self._candidate)
+        self.sequences.candidate.currentIndexChanged.connect(lambda i: self.set_candidate(i + 1))
         self._sequence_page.layout().addWidget(self.sequences)
         return self.sequences
 
     def set_candidate(self, candidate):
+        """The sample candidate shown, the same in the stacked view and the sequence comparison."""
         self._candidate = candidate
+        self.stacked.set_sample(candidate)
         if self.sequences is not None:
             self.sequences.set_candidate(candidate)
+
+    def _toggle_whole(self):
+        self.stacked.toggle_whole()
+        self._update_whole_icon()
+
+    def _update_whole_icon(self):
+        back = self.stacked.is_whole() and self.stacked._before_whole is not None
+        self.whole_button.setIcon(self.style().standardIcon(QStyle.SP_TitleBarNormalButton if back
+                                                            else QStyle.SP_TitleBarMaxButton))
 
     def show_details(self, content):
         """Plain text, or [(section, [(key, value)])] (the stacked view's) as a compact two-column table."""
