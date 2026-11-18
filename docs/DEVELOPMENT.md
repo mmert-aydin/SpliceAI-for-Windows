@@ -73,6 +73,39 @@ Command line (no GUI):
 .venv\Scripts\python -m spliceai_pipeline.cli input.vcf --build hg38 --mode raw --fasta hg38.fa
 ```
 
+A short folder matters: TensorFlow's deepest file is 187 characters below the
+project folder, so a project folder path longer than about 70 characters hits
+Windows' 260-character limit during `pip install`. TensorFlow also needs the
+Microsoft Visual C++ runtime (`winget install -e --id Microsoft.VCRedist.2015+.x64`).
+
+## Reference score database from the command line
+
+One genome build at a time, with the exe or from source:
+
+```
+SpliceAI-VariantScoring.exe --build-refdb --build hg38 --fasta hg38.fa --out refdb\hg38
+.venv\Scripts\python -m spliceai_pipeline.refdb_build --build hg38 --fasta hg38.fa --out refdb\hg38 ^
+    --refseq-dir installer\thirdparty\refseq --mane-dir installer\thirdparty\mane
+```
+
+- A full build takes about 9 hours per genome build on a 6-core PC and about
+  1 GB of disk. It can be stopped at any time; the same command continues
+  after the last finished gene.
+- `--chrom 21` builds one chromosome, `--genes A,B` (or `--genes-file`) only
+  those genes, `--threads N` limits the CPU threads, `--no-keep-awake` lets
+  the PC sleep.
+- Check a finished build against fresh predictions and SpliceAI's own
+  `get_delta_scores` (about 25 minutes):
+
+  ```
+  .venv\Scripts\python -m spliceai_pipeline.refdb_validate --db refdb\hg38 --fasta hg38.fa ^
+      --out refdb\validation\hg38 --refseq-dir installer\thirdparty\refseq --mane-dir installer\thirdparty\mane
+  ```
+
+- The WT validation sets (`validation-sets/validation-set-<build>.h5`) hold
+  reference predictions of 56 genes per build; a database is compared with
+  them before it is used.
+
 ## Build the exe
 
 ```
