@@ -59,6 +59,9 @@ FIRST_LAUNCH_SECTIONS = [
 ]
 
 
+# Zenodo's concept DOI (all versions; resolves to the latest) -- shown under the paragraphs.
+DOI = "10.5281/zenodo.24332663"
+
 # Where to send bugs and suggestions -- shown just above the signature.
 CONTACT_EMAIL = "aydinn.mmert@gmail.com"
 CONTACT_LEAD = N_("Bug reports and suggestions")
@@ -81,6 +84,7 @@ def first_launch_html():
     parts = [f"<p><b>{t(FIRST_LAUNCH_TITLE)}</b></p>"]
     for header, body in FIRST_LAUNCH_SECTIONS:
         parts.append(f"<p><b>{t(header)}</b><br>{t(body)}</p>" if header else f"<p>{t(body)}</p>")
+    parts.append(f'<p><a href="https://doi.org/{DOI}">doi:{DOI}</a></p>')
     return "".join(parts)
 
 
@@ -119,6 +123,7 @@ class FirstLaunchDialog(QDialog):
         self.body_label = QLabel()
         self.body_label.setTextFormat(Qt.RichText)
         self.body_label.setWordWrap(True)
+        self.body_label.setOpenExternalLinks(True)
         # In a scroll area: on a short screen (a laptop at 150 %) the text scrolls and the buttons stay in sight.
         self.body_scroll = QScrollArea()
         self.body_scroll.setWidgetResizable(True)
