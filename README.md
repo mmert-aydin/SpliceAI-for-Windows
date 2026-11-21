@@ -1,5 +1,7 @@
 # SpliceAI for Windows
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24332663.svg)](https://doi.org/10.5281/zenodo.24332663)
+
 **SpliceAI Variant Scoring** is a Windows desktop application for
 [SpliceAI](https://github.com/Illumina/SpliceAI), Illumina's deep-learning
 model that predicts the effect of genetic variants on RNA splicing. It runs
@@ -143,7 +145,12 @@ personnel.
 
 ## Citation
 
-If you use this program in your work, please cite SpliceAI:
+If you use this program in your work, please cite it:
+
+> Aydın MM. SpliceAI for Windows (SpliceAI Variant Scoring). Zenodo.
+> doi:[10.5281/zenodo.24332663](https://doi.org/10.5281/zenodo.24332663)
+
+and SpliceAI:
 
 > Jaganathan K, Kyriazopoulou Panagiotopoulou S, McRae JF, et al. Predicting
 > Splicing from Primary Sequence with Deep Learning. *Cell*.

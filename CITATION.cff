@@ -4,6 +4,7 @@ type: software
 title: "SpliceAI for Windows (SpliceAI Variant Scoring)"
 version: 1.2.0
 date-released: 2026-11-18
+doi: 10.5281/zenodo.24332663
 authors:
   - family-names: "Aydın"
     given-names: "Mustafa Mert"
