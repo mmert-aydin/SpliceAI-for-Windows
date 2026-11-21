@@ -1,37 +1,25 @@
-﻿SpliceAI Variant Scoring - kurmadan önce lütfen okuyun
+﻿SpliceAI Variant Scoring – Kurulumdan önce lütfen okuyunuz
 
-BU KURULUM NELERİ KURAR
+BU KURULUMUN İÇERDİĞİ BİLEŞENLER
 
-Bu kurulum, SpliceAI Variant Scoring'i ve kullandığı araçları içerir:
-  - GRCh37 ve GRCh38 RefSeq veritabanlarıyla SnpEff (MIT Lisansı)
-  - Yalnızca SnpEff'i çalıştırmak için kullanılan Eclipse Temurin 21 Java
-    çalışma ortamı (Classpath Exception ile GPLv2)
-  - NCBI MANE Select özet verisi (kamu malı, NCBI)
-  - Yalnızca bu programın kullandığı Microsoft Visual C++ çalışma dosyaları
+Bu kurulum, SpliceAI Variant Scoring programını ve programın kullandığı aşağıdaki bileşenleri içermektedir:
+  - GRCh37 ve GRCh38 RefSeq veritabanlarıyla birlikte SnpEff (MIT Lisansı)
+  - Yalnızca SnpEff'in çalıştırılması için kullanılan Eclipse Temurin 21 Java çalışma ortamı (GPLv2, Classpath Exception ile)
+  - NCBI MANE Select özet verileri (kamu malı, NCBI)
+  - Yalnızca bu program tarafından kullanılan Microsoft Visual C++ çalışma zamanı dosyaları
 
-SPLICEAI'NİN KENDİSİ DAHİL DEĞİLDİR
+SPLICEAI BU KURULUMA DAHİL DEĞİLDİR
 
-SpliceAI'yi Illumina, Inc. geliştirir. Kurulum sırasında Setup, resmi
-SpliceAI 1.3.1 paketini yayımlandığı yer olan Python Package Index'ten
-(pypi.org) doğrudan indirir ve dosyanın yayımlananın tıpatıp aynısı olduğunu
-doğrular. Bunun için yalnızca kurulum sırasında, bir kez internet bağlantısı
-gerekir.
+SpliceAI, Illumina, Inc. tarafından geliştirilmiştir. Kurulum sırasında resmî SpliceAI 1.3.1 paketi, yayımlandığı kaynak olan Python Package Index'ten (pypi.org) doğrudan indirilir ve dosyanın yayımlanan sürümle birebir aynı olduğu doğrulanır. Bu işlem için yalnızca kurulum sırasında bir kez internet bağlantısı gereklidir.
 
-SpliceAI, Illumina, Inc. tarafından şu lisanslarla sunulur:
-  - kaynak kod: PolyForm Strict License 1.0.0
-  - eğitilmiş modeller: Creative Commons BY-NC 4.0
-İkisi de yalnızca akademik ve ticari olmayan kullanıma izin verir. Devam
-ederek SpliceAI kullanımınızın bu koşullara uygun olduğunu onaylamış
-olursunuz. Ticari kullanım için Illumina'dan lisans gerekir
-(AI_licensing@illumina.com).
+SpliceAI, Illumina, Inc. tarafından aşağıdaki lisanslar kapsamında sunulmaktadır:
+  - Kaynak kod: PolyForm Strict License 1.0.0
+  - Eğitilmiş modeller: Creative Commons BY-NC 4.0
+
+Her iki lisans da yalnızca akademik ve ticari olmayan kullanıma izin vermektedir. Kuruluma devam ederek SpliceAI'yi bu koşullara uygun biçimde kullanacağınızı kabul etmiş olursunuz. Ticari kullanım için Illumina'dan lisans alınması gerekmektedir (AI_licensing@illumina.com).
 
 KULLANIM KOŞULLARI
 
-Bu yazılım yalnızca akademik ve araştırma amaçlı kullanım için, açık ya da
-örtük hiçbir garanti olmaksızın sunulmaktadır. Tanı aracı değildir; çıktısı,
-yetkin kişilerce bağımsız olarak doğrulanmadan klinik karar vermede
-kullanılmamalıdır. Geliştirici, bu yazılımın herhangi bir kullanımından ya da
-çıktısına güvenilmesinden doğan hiçbir sorumluluk kabul etmez.
+Bu yazılım, yalnızca akademik ve araştırma amaçlı kullanım için ve açık ya da örtük hiçbir garanti verilmeksizin sunulmaktadır. Yazılım bir tanı aracı değildir; çıktıları, yetkin kişilerce bağımsız olarak doğrulanmadan klinik karar süreçlerinde kullanılmamalıdır. Geliştirici, yazılımın kullanımından veya çıktılarına dayanılarak yapılan işlemlerden doğabilecek sonuçlardan sorumlu tutulamaz.
 
-Üçüncü taraf lisanslarının tam metinleri programın içindedir (başlangıç
-ekranında "Lisansın tamamını oku...").
+Üçüncü taraf lisanslarının tam metinlerine program içinden ulaşılabilir (başlangıç ekranında "Lisansın tamamını oku...").

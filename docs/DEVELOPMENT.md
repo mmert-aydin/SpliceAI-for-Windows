@@ -444,7 +444,11 @@ Check in `tests/test_pipeline.py`.
 The welcome notice shows the Zenodo DOI (`first_launch_dialog.py`). The
 Sandbox `usb-reference` run can map a finished USB folder as the drive
 (`run-sandbox.ps1 -UsbDir`) and then also checks that Setup copies the
-reference score databases and that the copies are valid.
+reference score databases and that the copies are valid. Setup's license
+texts (`terms.txt`, `terms-tr.txt`) are one line per paragraph, so the wizard
+wraps them to its own width; the Turkish texts are formal, including Inno's own
+(`[Messages]` in `messages-tr.isl`, which also fixes its Ready page naming
+"Sonraki" for the "Kur" button).
 
 ## Still open
 
