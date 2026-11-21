@@ -440,6 +440,12 @@ Check in `tests/test_pipeline.py`.
 - [hg19-canonical-vs-vcf-tab.tsv](hg19-canonical-vs-vcf-tab.tsv): the hg19
   genes whose canonical transcript differs from the VCF tab's choice.
 
+**1.2.1 (2026-11).** The Windows installer and USB drive for 1.2.0's code.
+The welcome notice shows the Zenodo DOI (`first_launch_dialog.py`). The
+Sandbox `usb-reference` run can map a finished USB folder as the drive
+(`run-sandbox.ps1 -UsbDir`) and then also checks that Setup copies the
+reference score databases and that the copies are valid.
+
 ## Still open
 
 **First-run check of the PC's prerequisites.** The reference genome, SnpEff

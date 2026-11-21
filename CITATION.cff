@@ -2,8 +2,8 @@ cff-version: 1.2.0
 message: "If you use this software, please cite it as below, and cite SpliceAI itself (Jaganathan et al., Cell 2019; see README)."
 type: software
 title: "SpliceAI for Windows (SpliceAI Variant Scoring)"
-version: 1.2.0
-date-released: 2026-11-18
+version: 1.2.1
+date-released: 2026-11-21
 doi: 10.5281/zenodo.24332663
 authors:
   - family-names: "Aydın"

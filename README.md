@@ -26,8 +26,10 @@ without Linux, WSL or the command line.
 
 ## Download and install
 
-Version 1.2.0 is distributed as source code; its Windows installer will follow
-with version 1.2.1. The previous installer (1.1.1) is available on the
+The Windows installer of version 1.2.1 is distributed on USB drives. From this
+page, the program is installed from the source code of version 1.2.0, which
+differs from 1.2.1 only in the DOI on the welcome notice. The previous
+installer (1.1.1) is available on the
 [releases page](https://github.com/mmert-aydin/SpliceAI-for-Windows/releases)
 and does not include Sequence to cDNA, the reference score database or the
 Turkish interface.

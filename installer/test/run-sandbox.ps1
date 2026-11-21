@@ -43,6 +43,9 @@ param(
     [string]$ExtraVcf,
     [string]$ExtraExpected,
     [string]$Wheel,
+    # A finished USB folder (Setup.exe, reference-data, spliceai-refdb), mapped
+    # as C:\USB as it is: tests the drive exactly as it is handed out.
+    [string]$UsbDir,
     [int]$TimeoutMinutes = 60,
     # Memory for the sandbox. Scoring a large VCF needs the default; the
     # click-through (one variant) is fine with 6144, which leaves more for
@@ -97,6 +100,7 @@ if ($Scenario -eq "usb-reference") {
 Copy-Item (Join-Path $PSScriptRoot "data\*") $data
 if ($ExtraVcf) { Copy-Item $ExtraVcf (Join-Path $data "extra.vcf") }
 if ($ExtraExpected) { Copy-Item $ExtraExpected (Join-Path $data "extra-expected.tsv") }
+if ($UsbDir) { $usb = (Resolve-Path $UsbDir).Path }
 
 function Map($hostDir, $sandboxDir, $readOnly) {
     "    <MappedFolder><HostFolder>$hostDir</HostFolder><SandboxFolder>$sandboxDir</SandboxFolder><ReadOnly>$($readOnly.ToString().ToLower())</ReadOnly></MappedFolder>"

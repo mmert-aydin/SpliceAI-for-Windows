@@ -166,6 +166,16 @@ if ($Scenario -eq "usb-reference") {
     $short = @($refNames | Where-Object {
         (Test-Path "$userRef\$_") -and (Get-Item "$userRef\$_").Length -ne (Get-Item "C:\USB\reference-data\$_").Length })
     Check "reference.copy_is_complete" (-not $short) "wrong size: $($short -join ', ')"
+    # The score databases, when the drive carries them (run-sandbox.ps1 -UsbDir): copied whole, and usable.
+    foreach ($b in "hg19", "hg38") {
+        $src = "C:\USB\spliceai-refdb\$b"; $dst = "$userRef\spliceai-refdb\$b"
+        if (-not (Test-Path "$src\manifest.json")) { continue }
+        $bad = @(Get-ChildItem $src -File | Where-Object {
+            -not (Test-Path "$dst\$($_.Name)") -or (Get-Item "$dst\$($_.Name)").Length -ne $_.Length } | ForEach-Object Name)
+        Check "refdb.${b}_copied_by_setup" (-not $bad) "missing or wrong size: $($bad -join ', ')"
+        $c = Start-Process $exe -ArgumentList "--check-refdb", "`"$dst`"", $b -Wait -PassThru
+        Check "refdb.${b}_valid" ($c.ExitCode -eq 0) "--check-refdb exit $($c.ExitCode) (0 valid, 2 none, 1 refused)"
+    }
 }
 
 $wsh = New-Object -ComObject WScript.Shell
@@ -230,6 +240,9 @@ Check "uninstall.entry_removed" (-not (Test-Path "HKCU:\Software\Microsoft\Windo
 # must not take 6 GB away.
 if ($Scenario -eq "usb-reference") {
     Check "uninstall.reference_data_kept" ((Test-Path "$userRef\hg19.fa") -and (Test-Path "$userRef\hg38.fa")) $userRef
+    if (Test-Path "C:\USB\spliceai-refdb") {
+        Check "uninstall.refdb_kept" ((Test-Path "$userRef\spliceai-refdb\hg19\manifest.json") -and (Test-Path "$userRef\spliceai-refdb\hg38\manifest.json"))
+    }
 }
 
 # --- report -----------------------------------------------------------------------
